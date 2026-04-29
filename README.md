@@ -1,4 +1,4 @@
-# llm-wiki-skills
+# llm-gen-repo-wiki Skills
 
 A set of Claude Code skills that generate structured markdown wiki documentation for any code repository. Given a repo root, the skills explore the codebase, propose a topic plan, let you review and edit it interactively, then write a complete set of wiki documents in parallel.
 
