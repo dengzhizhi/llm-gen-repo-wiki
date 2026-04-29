@@ -20,12 +20,51 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 ### Pass 1 — Broad Scan
 
-1. **Gather the file tree** — Run `find . -type f | grep -v node_modules | grep -v .git | head -300` from `repo_root` to obtain a representative file listing.
+1. **Discover the file tree (BFS)** — Use the BFS file discovery procedure below to build a structural picture of the repository before reading any files.
 2. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`. If none exist, proceed without a README.
-3. **Read entry points and config files** — Identify and read the following files from `repo_root` in priority order:
-   - Entry points visible in the file tree: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers.
-   - Config files visible in the file tree: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files.
+3. **Read entry points and config files** — Using the file tree gathered in step 1, identify and read the following files from `repo_root` in priority order:
+   - Entry points: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers visible in the tree.
+   - Config files: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files visible in the tree.
 4. **Draft an internal topic outline** — From Pass 1 findings, produce a candidate list of 8–12 topic areas, each with a rough set of associated file paths. This draft is internal only — do not write it to disk.
+
+---
+
+### BFS File Discovery
+
+Use `git ls-tree` to explore the repository structure level by level. The command shows only the **immediate** contents of a directory (never recurses), with each entry classified as `blob` (file), `tree` (directory), or `commit` (submodule — treat as a leaf, do not explore further).
+
+**Stop conditions** — stop as soon as any one of these is met:
+- No important directories remain to explore
+- Depth has reached level 5
+- Running **entry count** (total lines across all `git ls-tree` outputs) reaches or exceeds **600**
+
+#### Phase 0 — Root (always run)
+
+```bash
+git ls-tree HEAD
+```
+
+Record every line as one entry; add to running total. Identify:
+- `blob` lines → root-level files (note important ones: READMEs, package manifests, entry points)
+- `tree` lines → level-1 directory candidates
+
+**All** level-1 directories proceed to Phase 1 — there is no content yet to judge importance on, so explore all of them.
+
+#### Phase 1–5 — BFS Levels
+
+Repeat for L = 1 to 5:
+
+1. Take the set of directory paths selected for this level. If the set is empty, **stop**.
+2. Issue **one Bash call** for the entire set:
+   ```bash
+   git ls-tree HEAD <dir1>/ <dir2>/ ... <dirN>/
+   ```
+3. Count the output lines; add to running total. If the running total now equals or exceeds 600, process this output and then **stop** — do not proceed to L+1.
+4. From the output, collect all `tree` entries as candidate subdirectories for level L+1.
+5. **Select important subdirectories** — mark a subdirectory as important if it is likely to contain source code, feature modules, data models, API handlers, infrastructure config, tests, or documentation. **Skip** directories whose names indicate generated or ephemeral output: `dist`, `build`, `out`, `.next`, `__pycache__`, `.cache`, `coverage`, `*.egg-info`, `tmp`, `logs`, `vendor` (skip unless the language idiom requires it, e.g. Go).
+6. The selected paths become the input for level L+1.
+
+---
 
 ### Pass 2 — Targeted Deep Read
 

@@ -72,7 +72,7 @@ test -f llm-gen-wiki/plan.yml && echo "exists" || echo "not found"
 
 Ask the user exactly once:
 
-> "Are there any specific topics or aspects you want the wiki to cover? List them (comma-separated), or press enter to skip."
+> "Are there any extra specific topics or aspects you want the wiki to cover? List them (comma-separated), or answer 'no' to skip."
 
 Capture the response as `extra_topics` (may be empty). Do not explore the codebase here — keep this step brief.
 
