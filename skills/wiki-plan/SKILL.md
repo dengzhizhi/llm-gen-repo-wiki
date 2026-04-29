@@ -15,6 +15,7 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 |---|---|---|
 | `repo_root` | string | Absolute path to the root of the repository being documented |
 | `extra_topics` | list of strings (optional) | Additional topic titles explicitly requested by the user; these MUST appear in the plan with `user_requested: true` |
+| `scope_prefix` | string | Path of `repo_root` relative to the git root; empty string `""` when `repo_root` is the git root |
 
 ## Process
 
@@ -31,7 +32,9 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 ### BFS File Discovery
 
-Use `git ls-tree` to explore the repository structure level by level. The command shows only the **immediate** contents of a directory (never recurses), with each entry classified as `blob` (file), `tree` (directory), or `commit` (submodule — treat as a leaf, do not explore further).
+Use `git ls-tree` to explore the repository structure level by level. All git commands must be run from `repo_root`. The command shows only the **immediate** contents of a directory (never recurses), with each entry classified as `blob` (file), `tree` (directory), or `commit` (submodule — treat as a leaf, do not explore further).
+
+`scope_prefix` is provided as an input. Because `git ls-tree` output paths are always relative to the git root, they will naturally carry `scope_prefix` as a leading component when it is non-empty — so phases 1–5 need no special adjustment once Phase 0 is scoped correctly.
 
 **Stop conditions** — stop as soon as any one of these is met:
 - No important directories remain to explore
@@ -41,7 +44,11 @@ Use `git ls-tree` to explore the repository structure level by level. The comman
 #### Phase 0 — Root (always run)
 
 ```bash
+# If scope_prefix is empty:
 git ls-tree HEAD
+
+# If scope_prefix is non-empty:
+git ls-tree HEAD -- <scope_prefix>/
 ```
 
 Record every line as one entry; add to running total. Identify:
@@ -55,9 +62,9 @@ Record every line as one entry; add to running total. Identify:
 Repeat for L = 1 to 5:
 
 1. Take the set of directory paths selected for this level. If the set is empty, **stop**.
-2. Issue **one Bash call** for the entire set:
+2. Issue **one Bash call** for the entire set. Directory paths come directly from the previous phase's `git ls-tree` output and already include `scope_prefix`:
    ```bash
-   git ls-tree HEAD <dir1>/ <dir2>/ ... <dirN>/
+   git ls-tree HEAD -- <dir1>/ <dir2>/ ... <dirN>/
    ```
 3. Count the output lines; add to running total. If the running total now equals or exceeds 600, process this output and then **stop** — do not proceed to L+1.
 4. From the output, collect all `tree` entries as candidate subdirectories for level L+1.

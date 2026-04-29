@@ -26,6 +26,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ"
 git branch --show-current
 git rev-parse HEAD
 git remote get-url origin 2>/dev/null || echo ""
+git rev-parse --show-toplevel
 ```
 
 From these outputs, derive:
@@ -44,6 +45,9 @@ From these outputs, derive:
   - Contains `github.com` → `github`
   - Contains `bitbucket.org` → `bitbucket`
   - Any other non-empty URL → `unknown`
+- `scope_prefix` — derived by comparing the git root (from `git rev-parse --show-toplevel`) to the current working directory:
+  - If they are the **same path**: `scope_prefix` is empty string `""`
+  - If they **differ**: `scope_prefix` is the current working directory relative to the git root (e.g. if git root is `/work` and cwd is `/work/projects/myapp`, then `scope_prefix = "projects/myapp"`)
 
 Write `llm-gen-wiki/meta.yml` (create or overwrite):
 
@@ -53,9 +57,10 @@ branch: "<branch>"
 commit_hash: "<commit_hash>"
 origin_url: "<origin_url>"
 repo_type: "<repo_type>"
+scope_prefix: "<scope_prefix>"
 ```
 
-Keep all five values in memory for the rest of this session — they are passed to every subagent in Step 5.
+Keep all six values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
 
 ## Re-run Behaviour
 
@@ -84,6 +89,7 @@ Dispatch a subagent using the `wiki-plan` skill with the following inputs:
 |---|---|
 | `repo_root` | Absolute path to the current working directory |
 | `extra_topics` | The list collected in Step 1 (empty if the user skipped) |
+| `scope_prefix` | Value from Step 0 |
 
 Wait for the subagent to complete. It will write `llm-gen-wiki/plan.yml`.
 
@@ -184,6 +190,7 @@ Each subagent is invoked with the `wiki-write-topic` skill and receives:
 | `commit_hash` | Value from Step 0 |
 | `origin_url` | Value from Step 0 |
 | `repo_type` | Value from Step 0 |
+| `scope_prefix` | Value from Step 0 |
 | `business_context` | The topic's `business_context` from `llm-gen-wiki/plan.yml`; for subtopic docs, use the subtopic's `business_context` if present, otherwise fall back to the parent topic's `business_context`; empty string `""` if neither is present |
 
 Wait for all subagents to complete before proceeding.

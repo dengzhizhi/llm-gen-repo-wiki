@@ -24,6 +24,7 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 | `commit_hash` | string | Full 40-character git commit SHA at generation time |
 | `origin_url` | string | Canonical HTTPS root URL of the remote (e.g. `https://github.com/user/repo`) |
 | `repo_type` | string | `github`, `bitbucket`, or `unknown` — controls code link format |
+| `scope_prefix` | string | Path of `repo_root` relative to the git root; empty string `""` when `repo_root` is the git root. Prepend to file paths when building remote URLs. |
 | `business_context` | string | One sentence from `plan.yml` answering why this feature exists; used as the seed for the Purpose & Context section. Empty string `""` if absent on a subtopic. |
 
 ## Process
@@ -79,7 +80,7 @@ The following files were used as context for generating this wiki page:
 
 If `repo_type` is neither `github` nor `bitbucket` (i.e. local repo with no remote, or unrecognised host), use plain relative links with no remote URL: `[path/to/file.ext](path/to/file.ext)`.
 
-In all cases, substitute the actual `origin_url` and `commit_hash` values — do not use the placeholder strings above.
+In all cases, substitute the actual `origin_url` and `commit_hash` values — do not use the placeholder strings above. When building any remote URL, the file path segment must be prefixed with `scope_prefix` if it is non-empty: use `<scope_prefix>/path/to/file.ext`; if `scope_prefix` is empty, use `path/to/file.ext` directly.
 
 Remember, do not provide any acknowledgements, disclaimers, apologies, or any other preface before the metadata header. JUST START with the `>` blockquote line.
 
@@ -167,7 +168,7 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
 
    **No remote / unrecognised host** (i.e. `repo_type` is neither `github` nor `bitbucket`): use plain format with an empty href — `Sources: [path/to/file.ext:12-15]()` — so the label is still informative but no broken URL is emitted.
 
-   In all cases, substitute the actual `origin_url` and `commit_hash` — do not use placeholder strings. Multiple files in one citation are comma-separated on the same `Sources:` line.
+   In all cases, substitute the actual `origin_url` and `commit_hash` — do not use placeholder strings. Prepend `scope_prefix` to each file path when it is non-empty (same rule as the `<details>` block above). Multiple files in one citation are comma-separated on the same `Sources:` line.
    - If an entire section is overwhelmingly based on one or two files, you can cite them under the section heading in addition to more specific citations within the section.
    - IMPORTANT: You MUST cite AT LEAST 5 different source files throughout the wiki page to ensure comprehensive coverage.
 
