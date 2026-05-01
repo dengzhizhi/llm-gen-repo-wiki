@@ -19,10 +19,10 @@ This is the orchestrator skill for the `llm-wiki-skills` package. It coordinates
 
 ## Step 0 — Acquire Repository Metadata
 
-Run the `gen_meta.py` script from the skill directory to generate `llm-gen-wiki/meta.yml`:
+Run the `gen_meta.py` script to generate `llm-gen-wiki/meta.yml`:
 
 ```bash
-python3 ~/.claude/skills/wiki-gen/gen_meta.py
+python3 gen_meta.py
 ```
 
 The script writes `llm-gen-wiki/meta.yml` with these six fields:

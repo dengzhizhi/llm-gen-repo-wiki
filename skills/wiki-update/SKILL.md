@@ -1,0 +1,527 @@
+---
+name: wiki-update
+description: Use when adding a new topic to an already-generated wiki, or editing one or more existing topics' descriptions or generation instructions and regenerating their document(s) — persists all changes to plan.yml.
+---
+
+# Wiki Update
+
+## Overview
+
+This skill handles topic-level operations on an existing wiki produced by `wiki-gen`. It supports two modes:
+
+- **Add** — discover relevant files, draft a new topic YAML entry, confirm with user, append to `plan.yml`, and generate new document(s).
+- **Edit** — select one or more existing topics, update each topic's metadata or generation instructions, batch-update `plan.yml`, and regenerate all selected topics' documents in a single parallel dispatch.
+
+In both modes the skill refreshes repository metadata so regenerated documents carry the current commit hash and timestamp, then rebuilds `llm-gen-wiki/index.md` and appends to `llm-gen-wiki/log.md` when done.
+
+**Important:** The main thread never reads source files directly. All codebase exploration is delegated to subagents.
+
+When the skill starts, it announces: "Wiki update for: [current working directory]".
+
+## Prerequisites
+
+- Claude Code with the Agent tool available
+- `llm-gen-wiki/plan.yml` must exist (run `/wiki-gen` first)
+- `llm-gen-wiki/meta.yml` must exist
+- The `wiki-write-topic` skill must be available
+
+## Step 1 — Prerequisites Check
+
+Check that both required files exist:
+
+```bash
+test -f llm-gen-wiki/plan.yml && echo "plan: ok" || echo "plan: MISSING"
+test -f llm-gen-wiki/meta.yml && echo "meta: ok" || echo "meta: MISSING"
+```
+
+If either file is missing, stop immediately and tell the user:
+
+> "Cannot proceed: `llm-gen-wiki/[missing-file]` does not exist. Run `/wiki-gen` first to generate the initial wiki."
+
+## Step 2 — Refresh Metadata
+
+Run `gen_meta.py` to capture the **current** git state and write `llm-gen-wiki/meta.yml`:
+
+```bash
+python3 gen_meta.py
+```
+
+Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of this session. Every writing subagent dispatched in this session receives these values, so all regenerated documents will carry the current branch, commit hash, and generation timestamp — not the values from the original wiki-gen run.
+
+| Field | Purpose |
+|---|---|
+| `generated_at` | Embedded in every regenerated document's metadata header |
+| `branch` | Embedded in every regenerated document's metadata header |
+| `commit_hash` | Used in source-file hyperlinks in every regenerated document |
+| `origin_url` | Used in source-file hyperlinks |
+| `repo_type` | Controls hyperlink format (`github`, `bitbucket`, or `unknown`) |
+| `scope_prefix` | Passed to writing subagents and the discovery subagent |
+
+## Step 3 — Choose Mode
+
+Ask the user:
+
+> "What would you like to do?
+>
+> 1. **Add** a new topic to the wiki
+> 2. **Edit** one or more existing topics (update description, instructions, or files) and regenerate their document(s)"
+
+If the user answers **1** (or "add"), proceed to **Add Mode** (Steps A1–A7).
+If the user answers **2** (or "edit"), proceed to **Edit Mode** (Steps E1–E6).
+
+---
+
+## Add Mode
+
+### Step A1 — Gather Topic Input from User
+
+Ask the user for all required information in a **single message**:
+
+> "What topic do you want to add?
+>
+> - **Topic title** *(required)*:
+> - **Description** *(optional — what this document should cover, one sentence)*:
+> - **Importance** *(optional — high / medium / low, default: medium)*:
+> - **Generation notes** *(optional — additional instructions for the writer, e.g. "include a section on error handling" or "focus on the public API")*:
+> - **File or directory hints** *(optional — paths, module names, or keywords to guide file discovery)*:"
+
+Capture all five responses. Defaults: `description` = empty, `importance` = `medium`, `generation_notes` = empty, `hints` = empty.
+
+### Step A2 — Dispatch Discovery Subagent
+
+Dispatch a **single** subagent with the following instructions. Substitute all bracketed values literally before dispatching.
+
+---
+
+<role>
+You are a wiki topic discovery agent. Your job is to find the source files most relevant to a single new wiki topic, check the existing plan to avoid overlap, and draft the YAML entry for this topic. You do NOT write any files to disk — you print the YAML block to stdout.
+</role>
+
+<inputs>
+- `repo_root`: [absolute path to the current working directory]
+- `scope_prefix`: [value from meta.yml]
+- `topic_title`: [value from Step A1]
+- `topic_description`: [value from Step A1, may be empty string]
+- `topic_importance`: [value from Step A1]
+- `hints`: [value from Step A1, may be empty string]
+- `plan_path`: [repo_root]/llm-gen-wiki/plan.yml
+</inputs>
+
+<guidelines>
+
+**Phase 0 — Read the Existing Plan**
+
+Read `plan_path`. Extract the `id`, `title`, and `relevant_files` for every existing topic. Keep this in memory to avoid assigning files already thoroughly covered by an existing topic, and to detect substantial overlap with an existing topic.
+
+**Phase 1 — BFS File Discovery**
+
+Use `git ls-tree` to explore the repository structure level by level. All git commands must be run from `repo_root`. Stop when any one of these is met:
+- No important directories remain to explore
+- Depth has reached level 5
+- Running entry count reaches or exceeds **400**
+
+Root (always run):
+```bash
+# scope_prefix empty:
+git ls-tree HEAD
+# scope_prefix non-empty:
+git ls-tree HEAD -- <scope_prefix>/
+```
+
+All level-1 `tree` entries proceed to level 2. For levels 2–5: issue one Bash call per level for all selected directories, mark subdirectories as important if they likely contain source code, feature modules, data models, API handlers, config, tests, or documentation relevant to `topic_title` or `hints`. Skip: `dist`, `build`, `out`, `.next`, `__pycache__`, `.cache`, `coverage`, `*.egg-info`, `tmp`, `logs`, `vendor`.
+
+**Phase 2 — Targeted File Reads**
+
+Read up to **20 files** total that are likely related to `topic_title` and `hints`. Prioritise files whose names mention keywords from the title or hints, and core logic / model / API handler files for the topic area.
+
+**Phase 3 — Draft YAML Entry**
+
+- `id`: unique kebab-case slug from `topic_title`; append `-2` etc. if it collides with an existing id
+- `title`: `topic_title` as provided
+- `description`: use `topic_description` if non-empty; otherwise infer a one-sentence description from what you read
+- `business_context`: one sentence answering "What problem does this solve for users?" — derive from source files only; empty string `""` if no clear signal
+- `importance`: `topic_importance`
+- `user_requested`: `true`
+- `relevant_files`: 3–15 verified paths relative to `repo_root`
+- `subtopics`: assign only if topic spans 10+ files across 3+ distinct directories; otherwise `subtopics: []`
+- `generation_notes`: omit this field (the orchestrator carries it separately)
+
+**Output Format**
+
+Print to stdout, no preamble, no markdown fences:
+
+```
+DRAFT_TOPIC_YAML_START
+id: <kebab-case-id>
+title: <Display Title>
+description: <one-sentence description>
+business_context: <one sentence or empty string>
+importance: high|medium|low
+user_requested: true
+relevant_files:
+  - path/to/file.py
+subtopics: []
+DRAFT_TOPIC_YAML_END
+```
+
+If subtopics are present, format them as a YAML list. If you detected meaningful overlap with an existing topic, append:
+```
+OVERLAP_WARNING: This topic overlaps significantly with existing topic "<existing-title>" (<existing-id>).
+```
+
+</guidelines>
+
+---
+
+Wait for the subagent. Parse the YAML block between `DRAFT_TOPIC_YAML_START` and `DRAFT_TOPIC_YAML_END`. Keep any `OVERLAP_WARNING` for Step A3.
+
+### Step A3 — Confirm/Edit Loop
+
+Display the draft topic (inject the user's `generation_notes` into the display even though the subagent didn't include it in the YAML):
+
+```
+New topic draft:
+
+  ID:               <id>
+  Title:            <title>
+  Description:      <description>
+  Business context: <business_context>
+  Importance:       <importance>
+  Generation notes: <generation_notes from Step A1, or "(none)">
+  Files ([N] relevant files):
+    - path/to/file.py
+    ...
+  Subtopics:        none  [or list subtopic titles]
+
+[OVERLAP WARNING: ...]   ← only shown if subagent returned OVERLAP_WARNING
+
+Commands:
+  ok
+  title <new title>
+  description <text>
+  importance high|medium|low
+  business-context <sentence>
+  notes <text>                          — set or replace generation notes
+  notes clear                           — remove generation notes
+  add-file <path>
+  remove-file <path>
+  sub <title>                           — add a subtopic
+  remove-sub <subtopic-id>              — remove a subtopic
+  (plain-English edits also accepted)
+```
+
+Loop until `ok`. Do not write to disk during this loop.
+
+### Command Processing (Add Mode)
+
+- **`title <new title>`**: Update `title`; re-derive `id` (kebab slug, check collision); update subtopic ids to use new parent prefix.
+- **`description <text>`**: Replace `description`.
+- **`importance high|medium|low`**: Replace `importance`.
+- **`business-context <sentence>`**: Replace `business_context`.
+- **`notes <text>`**: Set `generation_notes` to `<text>`.
+- **`notes clear`**: Set `generation_notes` to empty string.
+- **`add-file <path>`**: Append to `relevant_files` if not already present.
+- **`remove-file <path>`**: Remove from `relevant_files`.
+- **`sub <title>`**: Append subtopic with `id`: `<parent-id>--<slug>`, `title`, empty `description`, `user_requested: false`, `relevant_files: []`.
+- **`remove-sub <subtopic-id>`**: Remove matching subtopic.
+- **Plain-English edits**: Apply to in-memory draft; describe the change before re-displaying.
+
+### Step A4 — Update plan.yml
+
+Read current `llm-gen-wiki/plan.yml`. Append the confirmed topic as the last entry in the `topics:` list using this field order: `id`, `title`, `description`, `business_context`, `importance`, `user_requested`, `relevant_files`, `subtopics`. If `generation_notes` is non-empty, append it as the final field:
+
+```yaml
+    generation_notes: "<text>"
+```
+
+If `generation_notes` is empty, omit the field entirely.
+
+Write the complete updated YAML back to `llm-gen-wiki/plan.yml`.
+
+### Step A5 — Compute Filename(s)
+
+Count total top-level topics in the updated `plan.yml`. The new topic is at position `NN` (1-based, zero-padded to 2 digits).
+
+- No subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: false`)
+- With subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: true`) + `llm-gen-wiki/<NN>a-<subtopic-slug>.md`, `<NN>b-...` (`is_overview: false`)
+  - `<subtopic-slug>` is the portion of the subtopic `id` after the `--` separator
+
+### Step A6 — Dispatch Writing Subagent(s)
+
+Dispatch **all** writing subagents in a **single Agent batch call**.
+
+Each subagent uses the `wiki-write-topic` skill. Build `effective_description` before dispatching:
+
+```
+effective_description = topic description
+if generation_notes is non-empty:
+    effective_description += "\n\nAdditional generation instructions: " + generation_notes
+```
+
+Pass `effective_description` as the `topic_description` input to `wiki-write-topic`. For subtopic docs, similarly append the parent's `generation_notes` (if any) to the subtopic description.
+
+| Input | Value |
+|---|---|
+| `topic_title` | Topic or subtopic title |
+| `topic_description` | `effective_description` (as above) |
+| `relevant_files` | Topic-level files for overview docs; subtopic-level files for subtopic docs |
+| `repo_root` | Absolute path to current working directory |
+| `output_file` | Absolute path from Step A5 |
+| `is_overview` | Boolean from Step A5 |
+| `generated_at` | From Step 2 |
+| `branch` | From Step 2 |
+| `commit_hash` | From Step 2 |
+| `origin_url` | From Step 2 |
+| `repo_type` | From Step 2 |
+| `scope_prefix` | From Step 2 |
+| `business_context` | Topic's `business_context`; for subtopic docs fall back to parent's if subtopic has none; `""` if neither present |
+
+Wait for all subagents to complete.
+
+### Step A7 — Finalize
+
+Proceed to **Shared Steps** (Steps S1–S3) with mode = `add`, topic list = [the new topic].
+
+---
+
+## Edit Mode
+
+### Step E1 — Select Topics
+
+Read `llm-gen-wiki/plan.yml`. Display the full topic list:
+
+```
+Existing topics:
+
+  1.  [id: system-architecture]       System Architecture          (high)
+  2.  [id: authentication-flow]       Authentication Flow          (high)
+  3.  [id: configuration]             Configuration                (medium)
+  ...
+
+Enter the numbers or ids of the topics to edit (comma- or space-separated; ranges like 1-3 accepted; "all" to select everything):
+```
+
+**Selection syntax:**
+- Single: `2` or `authentication-flow`
+- Multiple: `1,3,5` or `1 3 5`
+- Range: `2-4` (topics 2, 3, and 4)
+- All: `all`
+- Mixed: `1,3-5,7`
+
+Resolve the selection to an ordered list of topic entries. If any token doesn't match a position or id, report the unrecognised token and ask again. Proceed once at least one valid topic is resolved.
+
+### Step E2 — Per-Topic Edit Loop
+
+For each topic in the selection, in order, run an individual edit loop.
+
+Display a progress header before each loop:
+
+```
+─────────────────────────────────────────────
+Editing topic [X of Y]: <title>
+─────────────────────────────────────────────
+
+  ID:               <id>
+  Title:            <title>  (not editable — changing id/title would orphan the existing file)
+  Description:      <description>
+  Business context: <business_context>
+  Importance:       <importance>
+  Generation notes: <generation_notes, or "(none)">
+  Files ([N] relevant files):
+    - path/to/file.py
+    ...
+  Subtopics:        none  [or list subtopic titles]
+
+Commands:
+  ok                                    — confirm edits to this topic, move to next
+  description <text>
+  importance high|medium|low
+  business-context <sentence>
+  notes <text>                          — set or replace generation notes
+  notes clear                           — remove generation notes
+  notes append <text>                   — append to existing generation notes
+  add-file <path>
+  remove-file <path>
+  sub <title>                           — add a subtopic
+  remove-sub <subtopic-id>              — remove a subtopic
+  (plain-English edits also accepted)
+```
+
+When the user types `ok`, save the confirmed in-memory state for this topic and immediately advance to the next topic in the selection. Do not write to disk yet.
+
+After all topics in the selection have been confirmed, continue to Step E3.
+
+### Command Processing (Edit Mode)
+
+`id` and `title` are not editable — changing them would orphan the existing file on disk. (To rename a topic, use Add Mode to add a new one and manually remove the old document.) All other commands:
+
+- **`description <text>`**: Replace `description`.
+- **`importance high|medium|low`**: Replace `importance`.
+- **`business-context <sentence>`**: Replace `business_context`.
+- **`notes <text>`**: Set `generation_notes` to `<text>`.
+- **`notes clear`**: Set `generation_notes` to empty string.
+- **`notes append <text>`**: Concatenate `<text>` to existing `generation_notes` (space-separated if non-empty).
+- **`add-file <path>`**: Append to `relevant_files` if not already present.
+- **`remove-file <path>`**: Remove from `relevant_files`.
+- **`sub <title>`**: Append subtopic with `id`: `<parent-id>--<slug>`, `title`, empty `description`, `user_requested: false`, `relevant_files: []`.
+- **`remove-sub <subtopic-id>`**: Remove matching subtopic.
+- **Plain-English edits**: Apply to in-memory draft; describe the change before re-displaying.
+
+### Step E3 — Batch Update plan.yml
+
+Read current `llm-gen-wiki/plan.yml`. For **each** confirmed topic in the selection, find its entry by `id` and replace it in-place with the confirmed in-memory values. Apply all replacements before writing.
+
+Field presence rule for `generation_notes`: write the field if non-empty; omit it entirely if empty.
+
+Write the complete updated YAML back to `llm-gen-wiki/plan.yml` in a **single write** after all replacements are applied.
+
+### Step E4 — Compute Filenames for All Selected Topics
+
+For each confirmed topic, find its 1-based position in the updated `plan.yml` (zero-padded to 2 digits = `NN`).
+
+Apply the same filename logic as Step A5:
+- No subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: false`)
+- With subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: true`) + lettered subtopic docs (`is_overview: false`)
+
+Collect the full list of output files across **all** selected topics.
+
+### Step E5 — Dispatch All Writing Subagents in One Parallel Batch
+
+Dispatch **all** writing subagents for **all** selected topics in a **single Agent batch call** — one subagent per document, all sent simultaneously.
+
+For each document, build `effective_description` by appending the topic's `generation_notes` to its `description` (same rule as Step A6). The regenerated documents overwrite existing files at the same paths.
+
+Pass the same 13 inputs as Step A6 to each `wiki-write-topic` subagent, using the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, and `scope_prefix`.
+
+Wait for all subagents to complete.
+
+### Step E6 — Finalize
+
+Proceed to **Shared Steps** (Steps S1–S3) with mode = `edit`, topic list = [all confirmed topics].
+
+---
+
+## Shared Steps
+
+### Step S1 — Rebuild index.md
+
+After all writing subagents complete, fully rebuild `llm-gen-wiki/index.md` from the current `llm-gen-wiki/plan.yml`.
+
+```markdown
+# [repo] Wiki
+
+| | |
+|---|---|
+| **Branch** | `[branch]` |
+| **Commit** | `[first 12 chars of commit_hash]` |
+| **Generated** | [generated_at] |
+
+[description from plan.yml top-level `description` field]
+
+## High Priority
+
+1. **[Topic Title](01-topic-id.md)** *(N source files)* — [topic description]
+   - [Subtopic Title](01a-subtopic-slug.md) — [subtopic description]
+
+## Medium Priority
+
+2. **[Topic Title](02-topic-id.md)** *(N source files)* — [topic description]
+
+## Low Priority
+
+3. **[Topic Title](03-topic-id.md)** *(N source files)* — [topic description]
+
+---
+*Generated by llm-gen-repo-wiki*
+```
+
+Rules:
+- `[repo]` is the `repo` field from `plan.yml`
+- Topics are grouped into `## High Priority`, `## Medium Priority`, `## Low Priority` H2 sections. Omit a section heading if no topics have that importance level.
+- `*(N source files)*` is the count of paths in the topic's `relevant_files` list
+- `[topic description]` is the topic's `description` field (use as-is; `generation_notes` is never shown in the index)
+- Link hrefs use filenames only (no directory prefix), since `index.md` lives in the same `llm-gen-wiki/` directory
+- Subtopics indented under their parent; topics without subtopics have no sub-list
+- Number topics sequentially by position in the `topics` array (1-based), regardless of importance grouping
+
+### Step S2 — Append to log.md
+
+If `llm-gen-wiki/log.md` does not exist, create it with:
+
+```markdown
+# Wiki Generation Log
+
+<!-- append-only: newest entries at bottom -->
+```
+
+Then append one entry (whether the file existed or was just created).
+
+**Add mode** (single topic):
+```markdown
+## [YYYY-MM-DD] Added topic: [topic title]
+
+- New documents: [D]
+- Total topics in plan: [T]
+- Files referenced: [F]
+- Plan: llm-gen-wiki/plan.yml
+```
+
+**Edit mode — single topic:**
+```markdown
+## [YYYY-MM-DD] Updated topic: [topic title]
+
+- Regenerated documents: [D]
+- Total topics in plan: [T]
+- Files referenced: [F]
+- Plan: llm-gen-wiki/plan.yml
+```
+
+**Edit mode — multiple topics:**
+```markdown
+## [YYYY-MM-DD] Updated topics: [topic title 1], [topic title 2], ...
+
+- Regenerated documents: [D total across all topics]
+- Total topics in plan: [T]
+- Plan: llm-gen-wiki/plan.yml
+```
+
+Where:
+- `YYYY-MM-DD` is today's date
+- `[D]` = total number of documents written across all topics in this operation
+- `[T]` = total top-level topics in `plan.yml` after all updates
+- `[F]` = total count of `relevant_files` paths across all topics in this operation (omitted from multi-topic entry for brevity)
+
+### Step S3 — Done
+
+**Add mode:**
+
+> "Topic added. [D] new document(s) written to `llm-gen-wiki/`:
+> - `llm-gen-wiki/<NN>-<topic-id>.md`
+> [  - `llm-gen-wiki/<NNa>-<subtopic-slug>.md`]
+>
+> `llm-gen-wiki/index.md` rebuilt with [T] total topics.
+>
+> Optional: run `/wiki-crossref` to update inline links, or `/wiki-lint` to check for issues."
+
+**Edit mode — single topic:**
+
+> "Topic updated. [D] document(s) regenerated in `llm-gen-wiki/`:
+> - `llm-gen-wiki/<NN>-<topic-id>.md`
+> [  - `llm-gen-wiki/<NNa>-<subtopic-slug>.md`]
+>
+> `llm-gen-wiki/index.md` rebuilt with [T] total topics.
+>
+> Optional: run `/wiki-crossref` to update inline links, or `/wiki-lint` to check for issues."
+
+**Edit mode — multiple topics:**
+
+> "Updated [Y] topics. [D] document(s) regenerated in `llm-gen-wiki/`:
+> - `llm-gen-wiki/<NN>-<topic-id>.md`   ← [topic title]
+> - `llm-gen-wiki/<NN>-<topic-id>.md`   ← [topic title]
+> [  - `llm-gen-wiki/<NNa>-<subtopic-slug>.md`]
+>
+> `llm-gen-wiki/index.md` rebuilt with [T] total topics.
+>
+> Optional: run `/wiki-crossref` to update inline links, or `/wiki-lint` to check for issues."
+
+where `[Y]` is the number of topics edited and `[D]` is the total document count across all of them.

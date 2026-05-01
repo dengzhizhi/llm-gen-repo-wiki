@@ -16,15 +16,23 @@ A set of Claude Code skills that generate structured markdown wiki documentation
 
 ## Installation
 
-**Option A — Manual copy**
+**Option A — Ask your agent**
+
+After cloning this repository, open Claude Code (or any compatible agent) in the repo root and ask:
+
+> "Install the wiki skills from this repository to my user-level skills directory."
+
+The agent will copy every skill directory under `skills/` into the appropriate skills folder (e.g. `~/.claude/skills/` for Claude Code).
+
+**Option B — Manual copy**
 
 ```bash
 cp -r skills/wiki-gen skills/wiki-plan skills/wiki-write-topic \
-      skills/wiki-crossref skills/wiki-lint \
+      skills/wiki-crossref skills/wiki-lint skills/wiki-update \
       ~/.claude/skills/
 ```
 
-**Option B — Plugin install**
+**Option C — Plugin install**
 
 Coming soon.
 
@@ -39,6 +47,24 @@ The entry-point skill that coordinates the entire pipeline. Run it from the root
 3. **Interactive review** — Claude displays the proposed plan and accepts commands (`add`, `remove`, `rename`, `sub`, `importance`, or `ok`) so you can adjust it before any documents are written. You can also edit `llm-gen-wiki/plan.yml` directly in your editor and then type `ok`.
 4. **Parallel writing** — once you approve the plan, all `wiki-write-topic` subagents are dispatched simultaneously, one per document.
 5. **Index** — after all documents are written, Claude creates `llm-gen-wiki/index.md` linking the full contents, then confirms completion.
+
+### Post-generation updates — `/wiki-update`
+
+Add new topics or edit and regenerate existing ones without re-running the full pipeline. Run it from the same repository root after `/wiki-gen` has completed.
+
+```
+/wiki-update
+```
+
+On launch it asks whether you want to **add** a new topic or **edit** existing ones.
+
+**Add mode** — prompts for a title, optional description, importance, generation notes, and file hints. A discovery subagent finds relevant source files and drafts a topic YAML entry. You review and adjust it interactively before it is appended to `plan.yml` and its document is generated.
+
+**Edit mode** — displays the existing topic list. Select one or more topics by number, range, or id (e.g. `1`, `2,4`, `1-3`, `all`). For each selected topic you can update its description, importance, relevant files, and generation notes. Once all edits are confirmed, `plan.yml` is updated and all affected documents are regenerated in a single parallel batch.
+
+In both modes `llm-gen-wiki/index.md` is rebuilt from the full updated plan and an entry is appended to `llm-gen-wiki/log.md`.
+
+**Generation notes** — an optional `generation_notes` field you can set on any topic. It carries additional instructions to the writer (e.g. "focus on the public API" or "include a section on error handling") without affecting the one-line description shown in the index. Notes persist in `plan.yml` and are reapplied on every subsequent regeneration.
 
 ### Plan only — `/wiki-plan`
 
@@ -62,8 +88,10 @@ Regenerates one wiki document without re-running the full pipeline. Provide the 
 
 ```
 llm-gen-wiki/
-├── index.md                   # table of contents, generated last
-├── plan.yml                   # topic plan written by wiki-plan
+├── index.md                   # table of contents, rebuilt after every generation or update
+├── plan.yml                   # topic plan; updated in-place by wiki-update
+├── meta.yml                   # git metadata (branch, commit, remote URL) captured at generation time
+├── log.md                     # append-only record of every generation and update run
 ├── 01-system-architecture.md  # overview doc (topic with subtopics)
 ├── 01a-frontend.md            # subtopic doc
 ├── 01b-backend.md             # subtopic doc
@@ -77,7 +105,7 @@ Documents are numbered with zero-padded two-digit prefixes. Topics that have sub
 
 - **Specify extra topics up front** — when `/wiki-gen` asks "Are there any specific topics you want the wiki to cover?", list them. The planner guarantees they appear in `plan.yml` with `user_requested: true` and will never drop them.
 - **Edit the plan during confirmation** — type `add <title>`, `remove <id>`, `rename <id> <new title>`, `sub <parent-id> <title>`, or `importance <id> high|medium|low` at the confirmation prompt. Each command updates `llm-gen-wiki/plan.yml` and redisplays the plan before you type `ok`.
-- **Regenerate a single document** — edit `llm-gen-wiki/plan.yml` to adjust a topic's `relevant_files` or description, then run `/wiki-write-topic` with the updated values to rewrite just that document without touching the rest.
+- **Update topics after generation** — use `/wiki-update` to add a new topic or edit and regenerate one or more existing chapters. It patches `plan.yml` in-place and only rewrites the affected documents, leaving the rest untouched.
 - **Re-running after plan edits** — if `llm-gen-wiki/plan.yml` already exists when you invoke `/wiki-gen`, the skill skips the extra-topics question and the planning subagent and jumps straight to the interactive confirmation step, so you only pay for writing.
 
 ## Skills Reference
@@ -87,6 +115,7 @@ Documents are numbered with zero-padded two-digit prefixes. Topics that have sub
 | `wiki-gen` | `/wiki-gen` | Full orchestrator and entry point — coordinates planning, interactive review, and parallel document generation |
 | `wiki-plan` | `/wiki-plan` | Planning subagent — explores the repo and writes `llm-gen-wiki/plan.yml` |
 | `wiki-write-topic` | `/wiki-write-topic` | Writing subagent — produces one complete wiki document per invocation |
+| `wiki-update` | `/wiki-update` | Post-generation updates — add new topics or edit and regenerate existing ones; persists changes to `plan.yml` |
 | `wiki-crossref` | `/wiki-crossref` | *(Optional — token-intensive)* Adds inline cross-reference links between documents |
 | `wiki-lint` | `/wiki-lint` | *(Optional — token-intensive)* Health check — flags thin docs, orphan concepts, and missing links |
 
