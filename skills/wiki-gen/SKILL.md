@@ -19,48 +19,21 @@ This is the orchestrator skill for the `llm-wiki-skills` package. It coordinates
 
 ## Step 0 — Acquire Repository Metadata
 
-Run the following commands and capture their output:
+Run the `gen_meta.py` script from the skill directory to generate `llm-gen-wiki/meta.yml`:
 
 ```bash
-date -u +"%Y-%m-%dT%H:%M:%SZ"
-git branch --show-current
-git rev-parse HEAD
-git remote get-url origin 2>/dev/null || echo ""
-git rev-parse --show-toplevel
+python3 ~/.claude/skills/wiki-gen/gen_meta.py
 ```
 
-From these outputs, derive:
-- `generated_at` — the datetime string from `date`
-- `branch` — the current branch name
-- `commit_hash` — the full 40-character commit SHA
-- `origin_url` — the canonical HTTPS root URL of the remote:
-  - If `git remote get-url origin` produced no output or failed (no remote configured), set `origin_url` to empty string `""`
-  - Otherwise normalise the returned value:
-    - Strip a trailing `.git`
-    - Convert SSH form `git@github.com:user/repo` → `https://github.com/user/repo`
-    - Convert SSH form `git@bitbucket.org:project/repo` → `https://bitbucket.org/project/repo`
-    - HTTPS forms are used as-is (after stripping `.git`)
-- `repo_type` — derived from `origin_url`:
-  - `origin_url` is empty → `unknown`
-  - Contains `github.com` → `github`
-  - Contains `bitbucket.org` → `bitbucket`
-  - Any other non-empty URL → `unknown`
-- `scope_prefix` — derived by comparing the git root (from `git rev-parse --show-toplevel`) to the current working directory:
-  - If they are the **same path**: `scope_prefix` is empty string `""`
-  - If they **differ**: `scope_prefix` is the current working directory relative to the git root (e.g. if git root is `/work` and cwd is `/work/projects/myapp`, then `scope_prefix = "projects/myapp"`)
+The script writes `llm-gen-wiki/meta.yml` with these six fields:
+- `generated_at` — UTC ISO-8601 timestamp
+- `branch` — current git branch name
+- `commit_hash` — full 40-character commit SHA
+- `origin_url` — canonical HTTPS remote URL (SSH normalized; `.git` stripped; empty string if no remote)
+- `repo_type` — `github`, `bitbucket`, or `unknown`
+- `scope_prefix` — path from git root to cwd (empty string if cwd is the git root)
 
-Write `llm-gen-wiki/meta.yml` (create or overwrite):
-
-```yaml
-generated_at: "<generated_at>"
-branch: "<branch>"
-commit_hash: "<commit_hash>"
-origin_url: "<origin_url>"
-repo_type: "<repo_type>"
-scope_prefix: "<scope_prefix>"
-```
-
-Keep all six values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
+Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
 
 ## Re-run Behaviour
 
@@ -202,7 +175,11 @@ After all subagents complete, write `llm-gen-wiki/index.md` with the following s
 ```markdown
 # [repo] Wiki
 
-> **Branch:** `[branch]` · **Commit:** `[first 12 chars of commit_hash]` · **Generated:** [generated_at]
+| | |
+|---|---|
+| **Branch** | `[branch]` |
+| **Commit** | `[first 12 chars of commit_hash]` |
+| **Generated** | [generated_at] |
 
 [description from plan.yml top-level `description` field]
 
