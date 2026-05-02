@@ -29,10 +29,14 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 
 ## Process
 
-1. **Read source files** — Read each file in `relevant_files` using the Read tool (resolve paths relative to `repo_root`).
-2. **Expand if needed** — If fewer than 5 source files were provided or found, search the codebase for additional files closely related to `topic_title` and `topic_description` until at least 5 are available.
-3. **Generate the document** — Follow the Prompt section below exactly to produce the wiki markdown. If `is_overview` is `true`, follow the Overview Mode instructions instead of the full deep-dive.
-4. **Write to `output_file`** — Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document to stdout.
+1. **Read source files with line numbers** — Read each file in `relevant_files` using the Read tool (resolve paths relative to `repo_root`). Preserve line numbers for citation planning.
+2. **Expand if needed** — If fewer than 5 meaningfully relevant source files were provided or found, search the codebase for additional files closely related to `topic_title` and `topic_description` until at least 5 are available, or until the repository does not contain 5 relevant files.
+3. **Filter weakly related files** — Exclude files that are not meaningfully related to the topic. Do not cite or list a file solely to satisfy the 5-file target.
+4. **Build an internal evidence map** — Before drafting prose, identify the functions, classes, commands, config keys, data structures, entry points, workflows, error paths, and source line ranges that are directly relevant to the topic.
+5. **Draft an internal outline** — Plan the H2/H3 structure before writing. Each planned section must have at least one supporting source file and, for full deep-dives, the outline should include a workflow or data-flow section when the sources support one.
+6. **Generate the document** — Follow the Prompt section below exactly to produce the wiki markdown. If `is_overview` is `true`, follow the Overview Mode instructions instead of the full deep-dive.
+7. **Self-audit before writing** — Verify the completed document against the Quality Audit checklist below before writing it.
+8. **Write to `output_file`** — Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document to stdout.
 
 ## Prompt
 
@@ -41,10 +45,19 @@ Your task is to generate a comprehensive and accurate technical wiki page in Mar
 
 You will be given:
 1. The "[WIKI_PAGE_TOPIC]" for the page you need to create — this is `[topic_title]`.
-2. A list of "[RELEVANT_SOURCE_FILES]" from the project that you MUST use as the sole basis for the content. You have access to the full content of these files. You MUST use AT LEAST 5 relevant source files for comprehensive coverage — if fewer are provided, search for additional related files in the codebase.
+2. A list of "[RELEVANT_SOURCE_FILES]" from the project that you MUST use as the sole basis for the content. You have access to the full content of these files. You MUST use AT LEAST 5 meaningfully relevant source files for comprehensive coverage — if fewer are provided, search for additional related files in the codebase. If the repository truly does not contain 5 relevant files for this topic, use all relevant files and keep the page evidence-bounded rather than padding it.
+
+## Required Internal Preparation
+
+Before writing the final markdown document, perform this preparation internally. Do NOT include these notes in the output unless a later rule explicitly asks for a visible section.
+
+1. **Relevance filter** — Review every provided and discovered file. Keep only files that directly support the topic. Exclude weakly related files rather than citing them just to reach the 5-file target.
+2. **Evidence map** — Identify the relevant functions, classes, commands, config keys, data structures, entry points, workflows, error paths, and line ranges. Use this map to decide what deserves prose, tables, diagrams, and citations.
+3. **Outline** — Draft the H2/H3 outline before prose. Every planned section must be supported by at least one source file and should have a clear purpose in explaining this topic.
+4. **Boundary check** — Decide whether the topic boundaries are ambiguous or overlap with adjacent topics. If they are, include the boundary section described below.
 
 CRITICAL STARTING INSTRUCTION:
-The very first thing on the page MUST be a metadata header line, followed immediately by a `<details>` block listing ALL the `[RELEVANT_SOURCE_FILES]`.
+The very first thing on the page MUST be a metadata header line, followed immediately by a `<details>` block listing all source files actually used as context.
 
 **Metadata header** — a single blockquote line:
 
@@ -52,7 +65,7 @@ The very first thing on the page MUST be a metadata header line, followed immedi
 > **Branch:** `[branch]` · **Commit:** `[first 12 chars of commit_hash]` · **Generated:** [generated_at]
 ```
 
-**`<details>` block** — there MUST be AT LEAST 5 source files listed — if fewer were provided, you MUST find additional related files to include.
+**`<details>` block** — list ALL and ONLY the source files you actually used as context for this page. There SHOULD be at least 5 meaningfully relevant files. If fewer than 5 relevant files exist, list the available relevant files and write a shorter, evidence-bounded page instead of adding unrelated files.
 
 For `repo_type: github`, format file links as:
 ```
@@ -100,14 +113,22 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
 
 1. **Introduction:** Start with a concise introduction (1-2 paragraphs) explaining the purpose, scope, and high-level overview of "[topic_title]" within the context of the overall project. If relevant, and if information is available in the provided files, link to other potential wiki pages using the format `[Link Text](#page-anchor-or-id)`.
 
-2. **Detailed Sections:** Break down "[topic_title]" into logical sections using H2 (`##`) and H3 (`###`) Markdown headings. For each section:
+2. **Boundary Section (when needed):** If the topic overlaps with adjacent areas, include a short `## What This Page Covers` section and a short `## What This Page Does Not Cover` section after the Introduction. Use these sections only when they clarify ambiguous boundaries; omit them when the topic is already narrow and obvious.
+
+3. **Detailed Sections:** Break down "[topic_title]" into logical sections using H2 (`##`) and H3 (`###`) Markdown headings. For each section:
    - Explain the architecture, components, data flow, or logic relevant to the section's focus, as evidenced in the source files.
    - Identify key functions, classes, data structures, API endpoints, or configuration elements pertinent to that section.
+   - Do not create sections that are not directly supported by the evidence map.
 
-3. **Mermaid Diagrams:**
+4. **Workflow / Data Flow:** For full deep-dive pages, include at least one workflow-oriented H2 section when supported by the sources. Explain the main inputs, processing steps, outputs, side effects, and failure or fallback paths for the topic. If the files do not expose a meaningful workflow, omit this section rather than inventing one.
+
+5. **Sparse Topic Handling:** If the available evidence is thin, produce a shorter page with only the sections the files support. Do NOT pad the page with generic architecture, best-practice commentary, speculative future behavior, or unsupported diagrams. It is acceptable for a sparse topic page to cite fewer than 5 source files only when fewer than 5 relevant source files exist.
+
+6. **Mermaid Diagrams:**
    - EXTENSIVELY use Mermaid diagrams (e.g., `flowchart TD`, `sequenceDiagram`, `classDiagram`, `erDiagram`, `graph TD`) to visually represent architectures, flows, relationships, and schemas found in the source files.
    - Ensure diagrams are accurate and directly derived from information in the `[RELEVANT_SOURCE_FILES]`.
    - Provide a brief explanation before or after each diagram to give context.
+   - Every diagram MUST have a nearby `Sources:` citation that supports the relationships shown.
    - CRITICAL: All diagrams MUST follow strict vertical orientation:
      - Use "graph TD" (top-down) directive for flow diagrams
      - NEVER use "graph LR" (left-right)
@@ -140,20 +161,22 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
        - Use autonumber directive to add sequence numbers to messages
        - NEVER use flowchart-style labels like A--|label|-->B. Always use a colon for labels: A->>B: My Label
 
-4. **Tables:**
+7. **Tables:**
    - Use Markdown tables to summarize information such as:
      - Key features or components and their descriptions.
      - API endpoint parameters, types, and descriptions.
      - Configuration options, their types, and default values.
      - Data model fields, types, constraints, and descriptions.
+   - Every table MUST have a nearby `Sources:` citation that supports the entries.
 
-5. **Code Snippets (ENTIRELY OPTIONAL):**
+8. **Code Snippets (ENTIRELY OPTIONAL):**
    - Include short, relevant code snippets (e.g., Python, Java, JavaScript, SQL, JSON, YAML) directly from the `[RELEVANT_SOURCE_FILES]` to illustrate key implementation details, data structures, or configurations.
    - Ensure snippets are well-formatted within Markdown code blocks. ALWAYS include an explicit language identifier on every fenced code block — including Mermaid diagrams (` ```mermaid `), YAML (` ```yaml `), JSON (` ```json `), shell commands (` ```bash `), etc. Never use a bare ` ``` ` fence without a language tag.
 
-6. **Source Citations (EXTREMELY IMPORTANT):**
+9. **Source Citations (EXTREMELY IMPORTANT):**
    - For EVERY piece of significant information, explanation, diagram, table entry, or code snippet, you MUST cite the specific source file(s) and relevant line numbers from which the information was derived.
    - Place citations at the end of the paragraph, under the diagram/table, or after the code snippet.
+   - Prefer precise line ranges from the evidence map. Use whole-file citations only when the claim genuinely depends on the whole file structure rather than specific lines.
    - Citations MUST be hyperlinks to the exact location in the remote repository. Use the format that matches `repo_type`:
 
    **GitHub** (`repo_type: github`):
@@ -170,13 +193,13 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
 
    In all cases, substitute the actual `origin_url` and `commit_hash` — do not use placeholder strings. Prepend `scope_prefix` to each file path when it is non-empty (same rule as the `<details>` block above). Multiple files in one citation are comma-separated on the same `Sources:` line.
    - If an entire section is overwhelmingly based on one or two files, you can cite them under the section heading in addition to more specific citations within the section.
-   - IMPORTANT: You MUST cite AT LEAST 5 different source files throughout the wiki page to ensure comprehensive coverage.
+   - IMPORTANT: You MUST cite AT LEAST 5 different source files throughout the wiki page when at least 5 meaningfully relevant source files exist. If fewer than 5 relevant source files exist, cite every relevant source file and keep the page scoped to the available evidence.
 
-7. **Technical Accuracy:** All information must be derived SOLELY from the `[RELEVANT_SOURCE_FILES]`. Do not infer, invent, or use external knowledge about similar systems or common practices unless it's directly supported by the provided code. If information is not present in the provided files, do not include it or explicitly state its absence if crucial to the topic.
+10. **Technical Accuracy:** All information must be derived SOLELY from the `[RELEVANT_SOURCE_FILES]`. Do not infer, invent, or use external knowledge about similar systems or common practices unless it's directly supported by the provided code. If information is not present in the provided files, do not include it or explicitly state its absence if crucial to the topic.
 
-8. **Clarity and Conciseness:** Use clear, professional, and concise technical language suitable for other developers working on or learning about the project. Avoid unnecessary jargon, but use correct technical terms where appropriate.
+11. **Clarity and Conciseness:** Use clear, professional, and concise technical language suitable for other developers working on or learning about the project. Avoid unnecessary jargon, but use correct technical terms where appropriate.
 
-9. **Conclusion/Summary:** End with a brief summary paragraph if appropriate for "[topic_title]", reiterating the key aspects covered and their significance within the project.
+12. **Conclusion/Summary:** End with a brief summary paragraph if appropriate for "[topic_title]", reiterating the key aspects covered and their significance within the project.
 
 IMPORTANT: Always generate the content in English.
 
@@ -185,19 +208,33 @@ Remember:
 - Prioritize accuracy and direct representation of the code's functionality and structure.
 - Structure the document logically for easy understanding by other developers.
 
+### Quality Audit
+
+Before writing the document to `output_file`, review it internally and fix any issue found:
+
+- The `<details>` block lists only files that were actually used.
+- Each H2 section has at least one supporting `Sources:` citation, unless the section is purely navigational.
+- At least 5 distinct source files are cited when 5 relevant files exist; otherwise every relevant source file is cited.
+- Every Mermaid diagram and Markdown table has a nearby citation.
+- Every fenced code block has an explicit language tag.
+- Citation links use precise line ranges whenever possible.
+- The document includes workflow or data-flow coverage when the sources support it.
+- Sparse topics are short and evidence-bounded rather than padded.
+- No paragraph, diagram, table entry, or code explanation makes an unsupported claim.
+
 ### Overview Mode
 
 When `is_overview` is `true`, replace the full deep-dive above with a lightweight overview document structured as follows:
 
 1. **Metadata header** — same blockquote line as above.
-2. **`<details>` block** — same format (repo-type-aware hyperlinks) and ≥5 source files requirement as above.
+2. **`<details>` block** — same format (repo-type-aware hyperlinks) and source relevance rules as above.
 3. **H1 title** — `# [topic_title]`
 4. **Purpose & Context** — same `## Purpose & Context` section as the full deep-dive (see above).
 5. **Introduction** — 1-2 paragraphs describing the repository's overall purpose and architecture at a high level.
 6. **Component table** — A Markdown table listing the major subsystems/modules, their purpose, and a link to the corresponding subtopic wiki document (use relative links matching the output filenames generated by the orchestrator).
 7. **Mermaid overview diagram** — A single `graph TD` diagram showing the top-level components and their relationships. Follow all Mermaid diagram rules above.
 8. **Links to subtopic docs** — A bulleted list of links to each subtopic document.
-9. **Source citations** — Cite at least 5 source files using repo-type-aware hyperlinks as described in rule 6 above.
+9. **Source citations** — Cite at least 5 source files when 5 relevant files exist; otherwise cite every relevant source file using repo-type-aware hyperlinks as described in rule 9 above.
 
 Do NOT produce full deep-dive sections (no detailed architecture breakdowns, no sequence diagrams, no code snippets) in overview mode.
 
