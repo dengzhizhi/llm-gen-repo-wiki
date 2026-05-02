@@ -35,8 +35,9 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 4. **Build an internal evidence map** — Before drafting prose, identify the functions, classes, commands, config keys, data structures, entry points, workflows, error paths, and source line ranges that are directly relevant to the topic.
 5. **Draft an internal outline** — Plan the H2/H3 structure before writing. Each planned section must have at least one supporting source file and, for full deep-dives, the outline should include a workflow or data-flow section when the sources support one.
 6. **Generate the document** — Follow the Prompt section below exactly to produce the wiki markdown. If `is_overview` is `true`, follow the Overview Mode instructions instead of the full deep-dive.
-7. **Self-audit before writing** — Verify the completed document against the Quality Audit checklist below before writing it.
-8. **Write to `output_file`** — Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document to stdout.
+7. **Validate Mermaid syntax when possible** — If the document contains Mermaid diagrams, check whether `mmdc` (mermaid-cli) is available. If it is available, dispatch a subagent to validate Mermaid syntax only. The subagent does not need to keep or return rendered image files; it only reports syntax errors that must be fixed before writing.
+8. **Self-audit before writing** — Verify the completed document against the Quality Audit checklist below before writing it.
+9. **Write to `output_file`** — Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document to stdout.
 
 ## Prompt
 
@@ -129,10 +130,13 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
    - Ensure diagrams are accurate and directly derived from information in the `[RELEVANT_SOURCE_FILES]`.
    - Provide a brief explanation before or after each diagram to give context.
    - Every diagram MUST have a nearby `Sources:` citation that supports the relationships shown.
+   - For diagrams with multiple component categories, use Mermaid `classDef` and `class` styling to apply distinct, readable colors by category. Useful categories include user-facing entry points, orchestration/control flow, data or storage, external services, configuration, and error or fallback paths.
+   - Use color to clarify structure, not as decoration. Keep palettes restrained and high-contrast, explain category meaning through labels, grouping, or nearby prose, and do not rely on color alone for critical distinctions.
    - CRITICAL: All diagrams MUST follow strict vertical orientation:
      - Use "graph TD" (top-down) directive for flow diagrams
      - NEVER use "graph LR" (left-right)
      - Maximum node width should be 3-4 words
+     - Quote Mermaid node labels and edge labels with double quotes (`"..."`) wherever Mermaid syntax supports it, especially labels containing spaces, punctuation, parentheses, slashes, colons, brackets, or other special characters.
      - For sequence diagrams:
        - Start with "sequenceDiagram" directive on its own line
        - Define ALL participants at the beginning using "participant" keyword
@@ -216,6 +220,9 @@ Before writing the document to `output_file`, review it internally and fix any i
 - Each H2 section has at least one supporting `Sources:` citation, unless the section is purely navigational.
 - At least 5 distinct source files are cited when 5 relevant files exist; otherwise every relevant source file is cited.
 - Every Mermaid diagram and Markdown table has a nearby citation.
+- Complex Mermaid diagrams use category colors when they improve readability, and the category meaning is clear from labels, grouping, or nearby prose.
+- If Mermaid diagrams are present and `mmdc` is available, a subagent has validated their syntax and any syntax errors have been fixed. Do not require or preserve image output from this check.
+- Mermaid node labels and edge labels use double quotes where Mermaid syntax supports quoting, especially when labels contain spaces or special characters.
 - Every fenced code block has an explicit language tag.
 - Citation links use precise line ranges whenever possible.
 - The document includes workflow or data-flow coverage when the sources support it.
