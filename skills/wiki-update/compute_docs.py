@@ -11,6 +11,9 @@ WIKI_DIR = Path("llm-gen-wiki")
 PLAN_PATH = WIKI_DIR / "plan.yml"
 DOCUMENTS_PATH = WIKI_DIR / "documents.json"
 SAFE_KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PLAN_LIST_FIELDS = {"planning_warnings", "planning_questions"}
+TOPIC_LIST_FIELDS = {"diagram_candidates", "coverage_tags", "open_questions"}
+SUBTOPIC_LIST_FIELDS = {"diagram_candidates", "coverage_tags", "open_questions"}
 
 
 class PlanError(ValueError):
@@ -119,6 +122,9 @@ def parse_subtopics(lines, start, indent):
         if key == "relevant_files" and value == "":
             current[key], index = parse_string_list(lines, index + 1, line_indent + 2)
             continue
+        if key in SUBTOPIC_LIST_FIELDS and value == "":
+            current[key], index = parse_string_list(lines, index + 1, line_indent + 2)
+            continue
         current[key] = value
         index += 1
     return subtopics, index
@@ -152,6 +158,9 @@ def parse_topics(lines, start, indent):
         if key == "subtopics" and value == "":
             current[key], index = parse_subtopics(lines, index + 1, line_indent + 2)
             continue
+        if key in TOPIC_LIST_FIELDS and value == "":
+            current[key], index = parse_string_list(lines, index + 1, line_indent + 2)
+            continue
         current[key] = value
         index += 1
     return topics, index
@@ -171,6 +180,9 @@ def parse_plan(path=PLAN_PATH):
         key, value = split_key_value(line.strip())
         if key == "topics" and value == "":
             plan["topics"], index = parse_topics(lines, index + 1, 2)
+            continue
+        if key in PLAN_LIST_FIELDS and value == "":
+            plan[key], index = parse_string_list(lines, index + 1, 2)
             continue
         plan[key] = value
         index += 1

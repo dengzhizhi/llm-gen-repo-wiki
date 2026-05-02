@@ -83,6 +83,14 @@ Wiki plan generated. Here is the proposed structure:
    3a. [Subtopic Title]
 ...
 
+Planning warnings:
+  - [warning]
+  - [warning]
+
+Planning questions:
+  - [question]
+  - [question]
+
 Total documents to generate: N
 
 Commands:
@@ -95,6 +103,15 @@ Commands:
   (you can also edit llm-gen-wiki/plan.yml directly in your editor before typing ok)
 ```
 
+If `planning_warnings` is empty, show `Planning warnings: none`.
+If `planning_questions` is empty, show `Planning questions: none`.
+
+Preserve any existing additive metadata in `plan.yml`, including `planning_warnings`, `planning_questions`, and optional topic-level metadata on untouched topics.
+
+When presenting `planning_questions`, assume the user may not know the codebase well yet. Do not paraphrase them into shorter but less informative wording. Preserve the planner's context, rationale, and option structure so the user can answer from the review screen alone.
+
+If a `planning_questions` entry offers explicit options, present those options clearly and encourage the user to answer by selecting one of them. Prefer concise selection-style follow-up over asking the user to invent an answer from scratch.
+
 Loop on this prompt — process each command, update `llm-gen-wiki/plan.yml`, re-display the updated plan, and repeat — until the user types `ok`.
 
 ### Command Processing Rules
@@ -102,6 +119,8 @@ Loop on this prompt — process each command, update `llm-gen-wiki/plan.yml`, re
 - **`add <title>`**: Append a new top-level topic to `llm-gen-wiki/plan.yml` with:
   - `id`: auto-generated kebab-case slug derived from `<title>`
   - `title`: `<title>` as provided
+  - `description`: empty string (or omit)
+  - `business_context`: empty string (or omit)
   - `importance`: `medium`
   - `user_requested`: `false`
   - `relevant_files: []`
@@ -119,6 +138,8 @@ Loop on this prompt — process each command, update `llm-gen-wiki/plan.yml`, re
   - `relevant_files: []`
 
 - **`importance <id> high|medium|low`**: Update the `importance` field for the topic or subtopic whose `id` matches `<id>`.
+
+- When editing by command, preserve all unrelated optional metadata fields already present in the plan, such as `primary_audience`, `doc_goal`, `diagram_candidates`, `coverage_tags`, `open_questions`, `planning_warnings`, and `planning_questions`, unless the user explicitly changes them by editing the YAML directly.
 
 After each command, write the updated YAML back to `llm-gen-wiki/plan.yml` and re-display the full updated plan with the command menu.
 

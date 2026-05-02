@@ -1,13 +1,13 @@
 ---
 name: wiki-plan
-description: Use when discovering topics and generating a wiki structure plan for a code repository — reads the file tree and README, incorporates user-specified topics, and writes llm-gen-wiki/plan.yml. Invoked as a subagent by wiki-gen.
+description: Use when discovering topics and generating an onboarding-oriented wiki structure plan for a code repository, especially when the planner needs to audit coverage, capture uncertainty, and write llm-gen-wiki/plan.yml for wiki-gen review.
 ---
 
 # Wiki Plan
 
 ## Overview
 
-This skill is invoked as a subagent by the `wiki` orchestrator skill. It receives a repository root path and an optional list of extra topics, explores the codebase, and produces a structured plan file describing what wiki documents to generate. When the skill starts, it announces: "Planning wiki structure for repository at: [repo_root]".
+This skill is invoked as a subagent by the `wiki` orchestrator skill. It receives a repository root path and an optional list of extra topics, explores the codebase, and produces a structured plan file describing what wiki documents to generate. Its default lens is contributor onboarding: help a new developer understand where to start, how the system is organized, and which workflows matter first. When the skill starts, it announces: "Planning wiki structure for repository at: [repo_root]".
 
 ## Inputs
 
@@ -19,14 +19,15 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 ## Process
 
-### Pass 1 — Broad Scan
+### Pass 1 — Broad Structural Scan
 
 1. **Discover the file tree (BFS)** — Use the BFS file discovery procedure below to build a structural picture of the repository before reading any files.
 2. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`. If none exist, proceed without a README.
 3. **Read entry points and config files** — Using the file tree gathered in step 1, identify and read the following files from `repo_root` in priority order:
    - Entry points: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers visible in the tree.
    - Config files: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files visible in the tree.
-4. **Draft an internal topic outline** — From Pass 1 findings, produce a candidate list of 8–12 topic areas, each with a rough set of associated file paths. This draft is internal only — do not write it to disk.
+4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, lean more heavily on tests, route or handler definitions, package manifests, docs under `docs/`, CI workflows, deployment config, migration names, and comments/docstrings in entry-point or core files.
+5. **Draft an internal topic outline** — From Pass 1 findings, produce an internal candidate topic set sized to repository complexity. Prioritise onboarding-friendly topics such as entry points, primary workflows, key modules, configuration/setup, testing/debugging, and major architectural boundaries. This draft is internal only — do not write it to disk.
 
 ---
 
@@ -75,27 +76,53 @@ Repeat for L = 1 to 5:
 
 ### Pass 2 — Targeted Deep Read
 
-5. **Read domain files per topic** — For each candidate topic from Pass 1, identify and read 3–5 files in that domain: core logic files, data models, key API handlers, service classes, or similar. The goals are to:
+6. **Read domain files per topic** — For each candidate topic from Pass 1, identify and read 3–5 files in that domain: core logic files, data models, key API handlers, service classes, or similar. The goals are to:
    - Populate accurate `relevant_files` lists
    - Understand what each feature does at the implementation level
    - Understand *why* each feature exists from a product/business perspective (signals come from comments, naming, README references, and the shape of the code)
+   - Infer the likely primary audience and document goal for each topic
 
    Total file budget across both passes: soft cap of **40 files**. Stop earlier for small repos.
 
+### Pass 3 — Coverage Audit And Boundary Check
+
+7. **Audit plan coverage internally** — Before writing YAML, build an internal mapping from discovered repository aspects to candidate topic ids. Check whether the plan covers, when present:
+   - overall architecture and contributor mental model
+   - main user-facing or developer-facing workflows
+   - configuration and local setup
+   - data flow and state management
+   - tests and quality strategy
+   - deployment and runtime operations
+   - internal tooling and docs support
+   - all `extra_topics`
+
+   If an important area is uncovered, add a topic, broaden an existing topic, or explicitly justify folding it into another topic.
+
+8. **Discover cross-cutting concerns** — Look explicitly for concerns that span directories or modules: authentication, authorization, configuration loading, logging, observability, error handling, caching, background jobs, plugin seams, AI/model integration, tenancy, permissions, and feature flags. Elevate these into their own topics when they are architecturally significant.
+
+9. **Refine boundaries and capture uncertainty** — Merge or redraw overlapping topics. A topic must have a distinct reason to exist. Record any unresolved planning risks in `planning_warnings` and any high-value human decisions in `planning_questions`.
+
+   When you record `planning_questions`, assume the human may know very little about the codebase. Each question should therefore:
+   - include enough repository-specific context for the human to make the choice without reading code
+   - explain why the choice matters for the wiki structure
+   - prefer a small set of explicit options over open-ended wording
+   - use open-ended questions only when the decision cannot be expressed meaningfully as a bounded selection
+
 ### Finalise
 
-6. **Generate and write the wiki plan** — Follow the Prompt section below to produce the final YAML. Create the `llm-gen-wiki/` directory inside `repo_root` if it does not already exist, then write the YAML to `llm-gen-wiki/plan.yml`.
+10. **Generate and write the wiki plan** — Follow the Prompt section below to produce the final YAML. Create the `llm-gen-wiki/` directory inside `repo_root` if it does not already exist, then write the YAML to `llm-gen-wiki/plan.yml`.
 
 ## Prompt
 
 <role>
 You are an expert software architect and technical writer analysing a code repository to design the structure of a comprehensive wiki.
-Your goal is to produce a well-organised, hierarchical wiki plan that covers every significant aspect of the codebase so that developers can understand, navigate, and contribute to it with ease.
+Your goal is to produce a well-organised, hierarchical wiki plan that covers every significant aspect of the codebase so that developers can understand, navigate, and contribute to it with ease. Optimise primarily for onboarding new contributors while still covering major architecture and operational concerns when they are materially important.
 </role>
 
 <guidelines>
 - Analyse the file tree, README, and entry-point files provided to you before generating the plan.
-- Create between 8 and 12 top-level topics that together give COMPREHENSIVE coverage of the repository.
+- Size the number of top-level topics to repository complexity. Small repositories may need fewer topics; large repositories may need more. Keep the plan concise, but do not force filler topics or over-compress distinct subsystems.
+- Bias topic naming and ordering toward contributor onboarding: where to start, how the primary workflows move through the system, which modules matter first, how to run and configure the repo, and how to test or debug it.
 - Aim to cover all of the following areas where they are present in the repository:
   - Overall architecture and system design
   - Core features and key functionality
@@ -107,12 +134,15 @@ Your goal is to produce a well-organised, hierarchical wiki plan that covers eve
   - Configuration and environment setup
   - Extensibility, customisation, and plugin systems
   - Testing strategy and quality assurance
+- Perform an internal coverage audit before finalising the plan. If an important discovered area is not clearly represented, add a topic, broaden an existing topic, or intentionally fold it into another topic with a clear reason.
+- Explicitly look for cross-cutting concerns that may not map cleanly to a single directory, such as authentication, configuration loading, logging, observability, error handling, caching, async work, plugin seams, permissions, tenancy, feature flags, or AI/model integration.
 - Prefer topics that will benefit from visual diagrams (architecture overviews, data flows, component relationships, process workflows, state machines, class hierarchies).
 - Use importance levels to indicate priority:
   - `high` — foundational; understanding this topic is required before the others (e.g. overall architecture, core feature)
   - `medium` — important supporting topic (e.g. configuration, testing)
   - `low` — supplementary detail (e.g. minor utilities, changelog)
-- Assign `subtopics` only when a topic is genuinely large and complex — spanning 10 or more files across 3 or more distinct directories. Simple, focused topics MUST have `subtopics: []`. Subtopics should not repeat information from their parent; each subtopic covers a distinct slice of the parent domain.
+- Each top-level topic must have a distinct reason to exist. Merge or redraw candidate topics that substantially overlap in files, workflow coverage, or reader purpose.
+- Assign `subtopics` when a topic contains distinct workflows, audiences, or subsystem responsibilities. File count and directory spread are supporting signals, not the primary split rule. Simple, focused topics MUST have `subtopics: []`. Subtopics should not repeat information from their parent; each subtopic covers a distinct slice of the parent domain.
 - Every `relevant_files` list MUST contain only actual file paths verified from the file tree you gathered. Do NOT invent or guess file paths.
 - If `extra_topics` were provided, each extra topic MUST appear in the plan exactly as a top-level topic with `user_requested: true`. Extra topics must never be omitted or merged away — add them even if the repository does not appear to contain relevant files yet.
 - All other topics generated by your own analysis MUST have `user_requested: false`.
@@ -120,8 +150,21 @@ Your goal is to produce a well-organised, hierarchical wiki plan that covers eve
 - Subtopic ids MUST follow the format `<parent-id>--<child-slug>` using a double hyphen separator (e.g. `data-pipeline--ingestion`, `data-pipeline--transformation`).
 - The `repo` field should be the repository's directory name (the last component of `repo_root`).
 - The `description` field at the top level should be a single sentence describing the repository's overall purpose derived from the README and entry-point files.
+- Include `planning_warnings` when you have evidence-grounded uncertainty or weak signals that the human should keep in mind during review.
+- Include `planning_questions` when a human decision would materially improve the plan before generation starts.
+- `planning_questions` must be low-context and user-friendly. Assume the human may not know the repository internals yet.
+- Each `planning_questions` entry should be a complete prompt, not a fragment. It should briefly name the relevant repo area, describe the observed ambiguity, explain why the choice affects the plan, and then offer 2-4 concrete options when possible.
+- Prefer selection wording such as `Choose one: ...` or `Which of these should the wiki emphasize first: ...` over broad open-ended questions.
+- Good example: `The repo appears to have both a CLI entry flow in cli.py and a background processing path under worker/. Which should the onboarding docs emphasize first? Choose one: CLI-first, worker-first, or equal coverage.`
+- Avoid questions like `What do you want this wiki to focus on?` unless there is no narrower evidence-grounded choice available.
 - Every topic and subtopic must have a concise single-sentence `description` field that accurately describes what that document will cover.
 - Every **top-level topic** MUST include a `business_context` field: a single sentence answering "What problem does this feature solve for the product or its users?" Derive it from what you read in Pass 2 — never invent it. **Subtopics** MUST include `business_context` only when their business purpose is meaningfully distinct from their parent topic; otherwise omit the field on subtopics.
+- Topic-level optional metadata:
+  - `primary_audience` — use labels such as `new-contributor`, `maintainer`, `operator`, `plugin-author`, or `api-consumer`
+  - `doc_goal` — a short sentence describing what the document should help the reader accomplish
+  - `diagram_candidates` — optional list of diagram ideas worth rendering later
+  - `coverage_tags` — optional list of short labels for the system concerns this topic covers
+  - `open_questions` — optional list of unresolved topic-specific questions
 - Output ONLY the YAML content — no preamble, no commentary, no markdown code fences. The very first character of your output must be `r` (the start of `repo:`).
 </guidelines>
 
@@ -132,6 +175,10 @@ The output must conform exactly to the following YAML structure:
 ```
 repo: <repository-directory-name>
 description: <one-sentence description of the repository>
+planning_warnings:
+  - <short evidence-grounded warning>
+planning_questions:
+  - <context-rich user-facing question with explicit options when possible>
 topics:
   - id: <kebab-case-id>
     title: <Display Title>
@@ -139,6 +186,14 @@ topics:
     business_context: <one-sentence answer to "what problem does this solve for users or the product?">
     importance: high|medium|low
     user_requested: false
+    primary_audience: <optional audience label>
+    doc_goal: <optional one-sentence document goal>
+    diagram_candidates:
+      - <optional diagram idea>
+    coverage_tags:
+      - <optional short label>
+    open_questions:
+      - <optional unresolved topic-specific question>
     relevant_files:
       - path/to/file.py
       - path/to/other.ts
@@ -152,6 +207,7 @@ topics:
 ```
 
 Topics with no subtopics must have `subtopics: []` (not an absent key).
+If there are no meaningful plan-level warnings or questions, use `planning_warnings: []` and `planning_questions: []`.
 
 ### Formatting Rules
 
