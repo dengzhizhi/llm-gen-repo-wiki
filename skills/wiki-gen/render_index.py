@@ -72,6 +72,7 @@ def render_index(plan, meta):
         f"| **Branch** | `{meta.get('branch', '')}` |",
         f"| **Commit** | `{meta.get('commit_hash', '')[:12]}` |",
         f"| **Generated** | {meta.get('generated_at', '')} |",
+        f"| **Language** | {meta.get('language', 'English')} |",
         "",
         plan.get("description", ""),
         "",

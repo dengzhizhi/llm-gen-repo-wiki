@@ -17,23 +17,30 @@ This is the orchestrator skill for the `llm-wiki-skills` package. It coordinates
 - The `wiki-plan` and `wiki-write-topic` skills must be available
 - Run from the repository root (the directory you want to document)
 
-## Step 0 — Acquire Repository Metadata
+## Step 0 — Choose Language And Acquire Repository Metadata
+
+Ask the user exactly once:
+
+> "Which language should the wiki use? Default: English."
+
+If the user does not provide a clear language, use `English`.
 
 Run the skill-local `gen_meta.py` script to generate `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being documented, and invoke the script by its resolved path inside the `wiki-gen` skill directory:
 
 ```bash
-python3 <wiki-gen-skill-dir>/gen_meta.py
+python3 <wiki-gen-skill-dir>/gen_meta.py --language "<chosen-language>"
 ```
 
-The script writes `llm-gen-wiki/meta.yml` with these six fields:
+The script writes `llm-gen-wiki/meta.yml` with these seven fields:
 - `generated_at` — UTC ISO-8601 timestamp
 - `branch` — current git branch name
 - `commit_hash` — full 40-character commit SHA
 - `origin_url` — canonical HTTPS remote URL (SSH normalized; `.git` stripped; empty string if no remote)
 - `repo_type` — `github`, `bitbucket`, or `unknown`
 - `scope_prefix` — path from git root to cwd (empty string if cwd is the git root)
+- `language` — human-readable document language such as `English`, `Japanese`, or `Simplified Chinese`
 
-Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
+Read `llm-gen-wiki/meta.yml` and keep all seven values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
 
 ## Re-run Behaviour
 
@@ -175,6 +182,7 @@ Each subagent is invoked with the `wiki-write-topic` skill and receives:
 | `origin_url` | Value from Step 0 |
 | `repo_type` | Value from Step 0 |
 | `scope_prefix` | Value from Step 0 |
+| `language` | Value from Step 0 |
 | `business_context` | `business_context` from the document job |
 
 Wait for all subagents to complete before proceeding.

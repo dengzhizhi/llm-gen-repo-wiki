@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate llm-gen-wiki/meta.yml from git repository metadata."""
 
+import argparse
 import os
 import re
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,8 +50,8 @@ def derive_scope_prefix(git_root, cwd):
         return ""
 
 
-def main():
-    cwd = os.getcwd()
+def write_meta(cwd, language):
+    cwd = str(Path(cwd).resolve())
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     branch = run("git branch --show-current")
@@ -73,9 +73,26 @@ commit_hash: "{commit_hash}"
 origin_url: "{origin_url}"
 repo_type: "{repo_type}"
 scope_prefix: "{scope_prefix}"
+language: "{language}"
 """
 
     meta_path.write_text(meta_content)
+    return meta_path
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--language",
+        default="English",
+        help="Human-readable wiki language written into meta.yml.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    meta_path = write_meta(os.getcwd(), args.language)
     print(f"Wrote {meta_path}")
 
 

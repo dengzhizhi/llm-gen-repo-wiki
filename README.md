@@ -42,11 +42,12 @@ Coming soon.
 
 The entry-point skill that coordinates the entire pipeline. Run it from the root of the repository you want to document.
 
-1. **Extra topics** — Claude asks whether you have specific topics to include. List them comma-separated, or press enter to skip.
-2. **Planning** — a `wiki-plan` subagent explores the file tree, README, and key entry-point files, then writes `llm-gen-wiki/plan.yml` with 8–12 proposed topics.
-3. **Interactive review** — Claude displays the proposed plan and accepts commands (`add`, `remove`, `rename`, `sub`, `importance`, or `ok`) so you can adjust it before any documents are written. You can also edit `llm-gen-wiki/plan.yml` directly in your editor and then type `ok`.
-4. **Parallel writing** — once you approve the plan, all `wiki-write-topic` subagents are dispatched simultaneously, one per document.
-5. **Index** — after all documents are written, Claude creates `llm-gen-wiki/index.md` linking the full contents, then confirms completion.
+1. **Language** — Claude asks which language the wiki should use. If you do not provide one, it defaults to `English`, and the chosen human-readable value is stored in `llm-gen-wiki/meta.yml`.
+2. **Extra topics** — Claude asks whether you have specific topics to include. List them comma-separated, or answer `no` to skip.
+3. **Planning** — a `wiki-plan` subagent explores the file tree, README, and key entry-point files, then writes `llm-gen-wiki/plan.yml` with the proposed topics.
+4. **Interactive review** — Claude displays the proposed plan and accepts commands (`add`, `remove`, `rename`, `sub`, `importance`, or `ok`) so you can adjust it before any documents are written. You can also edit `llm-gen-wiki/plan.yml` directly in your editor and then type `ok`.
+5. **Parallel writing** — once you approve the plan, all `wiki-write-topic` subagents are dispatched simultaneously, one per document, and each writer uses the chosen language from `meta.yml`.
+6. **Index** — after all documents are written, Claude creates `llm-gen-wiki/index.md` linking the full contents, then confirms completion.
 
 ### Post-generation updates — `/wiki-update`
 
@@ -57,6 +58,8 @@ Add new topics or edit and regenerate existing ones without re-running the full 
 ```
 
 On launch it asks whether you want to **add** a new topic or **edit** existing ones.
+
+Before regenerating documents it also asks which language to use, defaulting to the current `llm-gen-wiki/meta.yml` language (or `English` if none is recorded). The selected human-readable value is written back to `meta.yml`.
 
 **Add mode** — prompts for a title, optional description, importance, generation notes, and file hints. A discovery subagent finds relevant source files and drafts a topic YAML entry. You review and adjust it interactively before it is appended to `plan.yml` and its document is generated.
 
@@ -90,7 +93,7 @@ Regenerates one wiki document without re-running the full pipeline. Provide the 
 llm-gen-wiki/
 ├── index.md                   # table of contents, rebuilt after every generation or update
 ├── plan.yml                   # topic plan; updated in-place by wiki-update
-├── meta.yml                   # git metadata (branch, commit, remote URL) captured at generation time
+├── meta.yml                   # git metadata plus chosen document language captured at generation time
 ├── log.md                     # append-only record of every generation and update run
 ├── 01-system-architecture.md  # overview doc (topic with subtopics)
 ├── 01a-frontend.md            # subtopic doc

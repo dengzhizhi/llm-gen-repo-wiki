@@ -25,6 +25,7 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 | `origin_url` | string | Canonical HTTPS root URL of the remote (e.g. `https://github.com/user/repo`) |
 | `repo_type` | string | `github`, `bitbucket`, or `unknown` — controls code link format |
 | `scope_prefix` | string | Path of `repo_root` relative to the git root; empty string `""` when `repo_root` is the git root. Prepend to file paths when building remote URLs. |
+| `language` | string | Human-readable output language such as `English`, `Japanese`, or `Simplified Chinese`. |
 | `business_context` | string | One sentence from `plan.yml` answering why this feature exists; used as the seed for the Purpose & Context section. Empty string `""` if absent on a subtopic. |
 
 ## Process
@@ -205,7 +206,7 @@ Based ONLY on the content of the `[RELEVANT_SOURCE_FILES]`:
 
 12. **Conclusion/Summary:** End with a brief summary paragraph if appropriate for "[topic_title]", reiterating the key aspects covered and their significance within the project.
 
-IMPORTANT: Always generate the content in English.
+IMPORTANT: Always generate the content in `[language]`. Treat `language` as the required output language for all prose, headings, captions, and explanations. Keep code, file paths, config keys, API names, and source citations in their original form unless translation is explicitly appropriate.
 
 Remember:
 - Ground every claim in the provided source files.

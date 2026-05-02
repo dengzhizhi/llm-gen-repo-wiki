@@ -38,15 +38,21 @@ If either file is missing, stop immediately and tell the user:
 
 > "Cannot proceed: `llm-gen-wiki/[missing-file]` does not exist. Run `/wiki-gen` first to generate the initial wiki."
 
-## Step 2 — Refresh Metadata
+## Step 2 — Confirm Language And Refresh Metadata
+
+Read the current `llm-gen-wiki/meta.yml` first and extract its `language` field if present. Ask the user:
+
+> "The current wiki language is [current-language-or-English]. Which language should regenerated documents use? Default: [current-language-or-English]."
+
+If the user does not provide a clear replacement, keep the current language. If the existing `meta.yml` has no `language` field, treat the default as `English`.
 
 Run the skill-local `gen_meta.py` script to capture the **current** git state and write `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being updated, and invoke the script by its resolved path inside the `wiki-update` skill directory:
 
 ```bash
-python3 <wiki-update-skill-dir>/gen_meta.py
+python3 <wiki-update-skill-dir>/gen_meta.py --language "<chosen-language>"
 ```
 
-Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of this session. Every writing subagent dispatched in this session receives these values, so all regenerated documents will carry the current branch, commit hash, and generation timestamp — not the values from the original wiki-gen run.
+Read `llm-gen-wiki/meta.yml` and keep all seven values in memory for the rest of this session. Every writing subagent dispatched in this session receives these values, so all regenerated documents will carry the current branch, commit hash, generation timestamp, and chosen language — not stale values from the original wiki-gen run.
 
 | Field | Purpose |
 |---|---|
@@ -56,6 +62,7 @@ Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of t
 | `origin_url` | Used in source-file hyperlinks |
 | `repo_type` | Controls hyperlink format (`github`, `bitbucket`, or `unknown`) |
 | `scope_prefix` | Passed to writing subagents and the discovery subagent |
+| `language` | Passed to writing subagents so regenerated documents use the selected human-readable language |
 
 ## Step 3 — Choose Mode
 
@@ -268,6 +275,7 @@ Each subagent uses the `wiki-write-topic` skill. Use the selected document jobs 
 | `origin_url` | From Step 2 |
 | `repo_type` | From Step 2 |
 | `scope_prefix` | From Step 2 |
+| `language` | From Step 2 |
 | `business_context` | `business_context` from the document job |
 
 Wait for all subagents to complete.
@@ -383,7 +391,7 @@ Read `llm-gen-wiki/documents.json` and collect jobs whose `topic_id` or `parent_
 
 Dispatch **all** writing subagents for **all** selected topics in a **single Agent batch call** — one subagent per document, all sent simultaneously.
 
-Pass the same 13 inputs as Step A6 to each `wiki-write-topic` subagent, using the selected document jobs and the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, and `scope_prefix`. The regenerated documents overwrite existing files at the same paths.
+Pass the same 14 inputs as Step A6 to each `wiki-write-topic` subagent, using the selected document jobs and the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, `scope_prefix`, and `language`. The regenerated documents overwrite existing files at the same paths.
 
 Wait for all subagents to complete.
 
