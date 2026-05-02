@@ -1,13 +1,13 @@
 ---
 name: wiki-plan
-description: Use when discovering topics and generating an onboarding-oriented wiki structure plan for a code repository, especially when the planner needs to audit coverage, capture uncertainty, and write llm-gen-wiki/plan.yml for wiki-gen review.
+description: Use when discovering topics and generating an architecture-first wiki structure plan for a code repository, especially when the planner needs to audit technical coverage, capture uncertainty, and write llm-gen-wiki/plan.yml for wiki-gen review.
 ---
 
 # Wiki Plan
 
 ## Overview
 
-This skill is invoked as a subagent by the `wiki` orchestrator skill. It receives a repository root path and an optional list of extra topics, explores the codebase, and produces a structured plan file describing what wiki documents to generate. Its default lens is contributor onboarding: help a new developer understand where to start, how the system is organized, and which workflows matter first. When the skill starts, it announces: "Planning wiki structure for repository at: [repo_root]".
+This skill is invoked as a subagent by the `wiki` orchestrator skill. It receives a repository root path and an optional list of extra topics, explores the codebase, and produces a structured plan file describing what wiki documents to generate. Its default lens is architectural overview and technical deep search: map the system boundaries, major execution paths, component relationships, and technically significant internals before lighter onboarding concerns. When the skill starts, it announces: "Planning wiki structure for repository at: [repo_root]".
 
 ## Inputs
 
@@ -27,7 +27,7 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
    - Entry points: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers visible in the tree.
    - Config files: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files visible in the tree.
 4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, lean more heavily on tests, route or handler definitions, package manifests, docs under `docs/`, CI workflows, deployment config, migration names, and comments/docstrings in entry-point or core files.
-5. **Draft an internal topic outline** — From Pass 1 findings, produce an internal candidate topic set sized to repository complexity. Prioritise onboarding-friendly topics such as entry points, primary workflows, key modules, configuration/setup, testing/debugging, and major architectural boundaries. This draft is internal only — do not write it to disk.
+5. **Draft an internal topic outline** — From Pass 1 findings, produce an internal candidate topic set sized to repository complexity. Prioritise architecture-first topics such as system boundaries, runtime paths, key modules, data flow, infrastructure/runtime configuration, integrations, testing strategy, and major cross-cutting concerns. This draft is internal only — do not write it to disk.
 
 ---
 
@@ -80,20 +80,20 @@ Repeat for L = 1 to 5:
    - Populate accurate `relevant_files` lists
    - Understand what each feature does at the implementation level
    - Understand *why* each feature exists from a product/business perspective (signals come from comments, naming, README references, and the shape of the code)
-   - Infer the likely primary audience and document goal for each topic
+   - Infer the likely technical audience and document goal for each topic
 
    Total file budget across both passes: soft cap of **40 files**. Stop earlier for small repos.
 
 ### Pass 3 — Coverage Audit And Boundary Check
 
 7. **Audit plan coverage internally** — Before writing YAML, build an internal mapping from discovered repository aspects to candidate topic ids. Check whether the plan covers, when present:
-   - overall architecture and contributor mental model
-   - main user-facing or developer-facing workflows
-   - configuration and local setup
+   - overall architecture and system boundaries
+   - main runtime paths and technically important workflows
+   - configuration, runtime setup, and operational environment
    - data flow and state management
    - tests and quality strategy
    - deployment and runtime operations
-   - internal tooling and docs support
+   - internal tooling, extensions, and docs support
    - all `extra_topics`
 
    If an important area is uncovered, add a topic, broaden an existing topic, or explicitly justify folding it into another topic.
@@ -116,13 +116,13 @@ Repeat for L = 1 to 5:
 
 <role>
 You are an expert software architect and technical writer analysing a code repository to design the structure of a comprehensive wiki.
-Your goal is to produce a well-organised, hierarchical wiki plan that covers every significant aspect of the codebase so that developers can understand, navigate, and contribute to it with ease. Optimise primarily for onboarding new contributors while still covering major architecture and operational concerns when they are materially important.
+Your goal is to produce a well-organised, hierarchical wiki plan that covers every significant aspect of the codebase so that developers can understand, navigate, and contribute to it with ease. Optimise primarily for architectural overview and technical deep search, while still including onboarding-oriented material only when it materially supports understanding the system.
 </role>
 
 <guidelines>
 - Analyse the file tree, README, and entry-point files provided to you before generating the plan.
 - Size the number of top-level topics to repository complexity. Small repositories may need fewer topics; large repositories may need more. Keep the plan concise, but do not force filler topics or over-compress distinct subsystems.
-- Bias topic naming and ordering toward contributor onboarding: where to start, how the primary workflows move through the system, which modules matter first, how to run and configure the repo, and how to test or debug it.
+- Bias topic naming and ordering toward architecture and technical depth: system boundaries, execution paths, major modules, component relationships, data flow, integrations, runtime behavior, infrastructure, testing strategy, and extension points.
 - Aim to cover all of the following areas where they are present in the repository:
   - Overall architecture and system design
   - Core features and key functionality
@@ -136,6 +136,7 @@ Your goal is to produce a well-organised, hierarchical wiki plan that covers eve
   - Testing strategy and quality assurance
 - Perform an internal coverage audit before finalising the plan. If an important discovered area is not clearly represented, add a topic, broaden an existing topic, or intentionally fold it into another topic with a clear reason.
 - Explicitly look for cross-cutting concerns that may not map cleanly to a single directory, such as authentication, configuration loading, logging, observability, error handling, caching, async work, plugin seams, permissions, tenancy, feature flags, or AI/model integration.
+- Prefer architecture-first grouping over lightweight onboarding grouping when the two compete. When in doubt, explain how the system is built and behaves before explaining how a newcomer should approach it.
 - Prefer topics that will benefit from visual diagrams (architecture overviews, data flows, component relationships, process workflows, state machines, class hierarchies).
 - Use importance levels to indicate priority:
   - `high` — foundational; understanding this topic is required before the others (e.g. overall architecture, core feature)
@@ -155,12 +156,12 @@ Your goal is to produce a well-organised, hierarchical wiki plan that covers eve
 - `planning_questions` must be low-context and user-friendly. Assume the human may not know the repository internals yet.
 - Each `planning_questions` entry should be a complete prompt, not a fragment. It should briefly name the relevant repo area, describe the observed ambiguity, explain why the choice affects the plan, and then offer 2-4 concrete options when possible.
 - Prefer selection wording such as `Choose one: ...` or `Which of these should the wiki emphasize first: ...` over broad open-ended questions.
-- Good example: `The repo appears to have both a CLI entry flow in cli.py and a background processing path under worker/. Which should the onboarding docs emphasize first? Choose one: CLI-first, worker-first, or equal coverage.`
-- Avoid questions like `What do you want this wiki to focus on?` unless there is no narrower evidence-grounded choice available.
+- Good example: `The repo appears to have both an HTTP request lifecycle under api/ and a background processing pipeline under worker/. Which subsystem should receive the deeper architectural treatment in the first pass? Choose one: API-first, worker-first, or equal depth.`
+- Avoid questions like `What do you want this wiki to focus on?` unless there is no narrower evidence-grounded technical choice available.
 - Every topic and subtopic must have a concise single-sentence `description` field that accurately describes what that document will cover.
 - Every **top-level topic** MUST include a `business_context` field: a single sentence answering "What problem does this feature solve for the product or its users?" Derive it from what you read in Pass 2 — never invent it. **Subtopics** MUST include `business_context` only when their business purpose is meaningfully distinct from their parent topic; otherwise omit the field on subtopics.
 - Topic-level optional metadata:
-  - `primary_audience` — use labels such as `new-contributor`, `maintainer`, `operator`, `plugin-author`, or `api-consumer`
+  - `primary_audience` — use labels such as `maintainer`, `operator`, `plugin-author`, `api-consumer`, `new-contributor`, or other technically meaningful audiences
   - `doc_goal` — a short sentence describing what the document should help the reader accomplish
   - `diagram_candidates` — optional list of diagram ideas worth rendering later
   - `coverage_tags` — optional list of short labels for the system concerns this topic covers

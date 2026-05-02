@@ -112,6 +112,8 @@ When presenting `planning_questions`, assume the user may not know the codebase 
 
 If a `planning_questions` entry offers explicit options, present those options clearly and encourage the user to answer by selecting one of them. Prefer concise selection-style follow-up over asking the user to invent an answer from scratch.
 
+Treat `planning_questions` primarily as architecture-shaping and depth-allocation decisions. The review step should help the user steer which subsystems, runtime paths, or technical concerns deserve the deepest treatment before document generation starts.
+
 Loop on this prompt — process each command, update `llm-gen-wiki/plan.yml`, re-display the updated plan, and repeat — until the user types `ok`.
 
 ### Command Processing Rules
