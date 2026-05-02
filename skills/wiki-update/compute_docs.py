@@ -240,6 +240,15 @@ def output_path(filename):
     return str((Path.cwd() / WIKI_DIR / filename).resolve())
 
 
+def effective_description(description, generation_notes):
+    if not generation_notes:
+        return description
+    return (
+        f"{description}\n\n"
+        f"Additional generation instructions: {generation_notes}"
+    )
+
+
 def build_documents(plan):
     documents = []
     for topic_index, topic in enumerate(plan.get("topics", []), start=1):
@@ -247,12 +256,15 @@ def build_documents(plan):
         topic_id = topic.get("id", "")
         subtopics = topic.get("subtopics", [])
         has_subtopics = bool(subtopics)
+        generation_notes = topic.get("generation_notes", "")
         documents.append(
             {
                 "topic_id": topic_id,
                 "parent_topic_id": None,
                 "topic_title": topic.get("title", ""),
-                "topic_description": topic.get("description", ""),
+                "topic_description": effective_description(
+                    topic.get("description", ""), generation_notes
+                ),
                 "relevant_files": topic.get("relevant_files", []),
                 "output_file": output_path(f"{prefix}-{topic_id}.md"),
                 "is_overview": has_subtopics,
@@ -270,7 +282,9 @@ def build_documents(plan):
                     "topic_id": subtopic.get("id", ""),
                     "parent_topic_id": topic_id,
                     "topic_title": subtopic.get("title", ""),
-                    "topic_description": subtopic.get("description", ""),
+                    "topic_description": effective_description(
+                        subtopic.get("description", ""), generation_notes
+                    ),
                     "relevant_files": subtopic.get("relevant_files", []),
                     "output_file": output_path(f"{prefix}{letter}-{slug}.md"),
                     "is_overview": False,

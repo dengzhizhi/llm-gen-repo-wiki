@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Append wiki-update add/edit records to llm-gen-wiki/log.md."""
 
-import json
 import sys
 from datetime import date
 
-from compute_docs import DOCUMENTS_PATH, WIKI_DIR, PlanError, build_documents, parse_plan
+from compute_docs import WIKI_DIR, PlanError, build_documents, parse_plan
 
 
 LOG_PATH = WIKI_DIR / "log.md"
@@ -35,12 +34,7 @@ def documents_for_topics(plan, topic_ids):
 
 
 def load_documents(plan):
-    if DOCUMENTS_PATH.exists():
-        return json.loads(DOCUMENTS_PATH.read_text())
-    documents = build_documents(plan)
-    WIKI_DIR.mkdir(exist_ok=True)
-    DOCUMENTS_PATH.write_text(json.dumps(documents, indent=2) + "\n")
-    return documents
+    return build_documents(plan)
 
 
 def topic_map(plan):
@@ -58,7 +52,12 @@ def validate_topic_ids(plan, mode, topic_ids):
 
 
 def file_count(topics):
-    return sum(len(topic.get("relevant_files", [])) for topic in topics)
+    total = 0
+    for topic in topics:
+        total += len(topic.get("relevant_files", []))
+        for subtopic in topic.get("subtopics", []):
+            total += len(subtopic.get("relevant_files", []))
+    return total
 
 
 def render_add_entry(plan, topics, documents):

@@ -19,10 +19,10 @@ This is the orchestrator skill for the `llm-wiki-skills` package. It coordinates
 
 ## Step 0 — Acquire Repository Metadata
 
-Run the `gen_meta.py` script to generate `llm-gen-wiki/meta.yml`:
+Run the skill-local `gen_meta.py` script to generate `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being documented, and invoke the script by its resolved path inside the `wiki-gen` skill directory:
 
 ```bash
-python3 gen_meta.py
+python3 <wiki-gen-skill-dir>/gen_meta.py
 ```
 
 The script writes `llm-gen-wiki/meta.yml` with these six fields:
@@ -124,125 +124,53 @@ After each command, write the updated YAML back to `llm-gen-wiki/plan.yml` and r
 
 ## Step 4 — Build Document List
 
-Read the confirmed `llm-gen-wiki/plan.yml` and compute the full ordered list of documents to generate. Use a 1-based index zero-padded to 2 digits.
+Run the skill-local `compute_docs.py` script to build the full ordered document job list. Keep the current working directory at the repository root being documented, and invoke the script by its resolved path inside the `wiki-gen` skill directory:
 
-**Topic WITH subtopics** (the topic's `subtopics` list is non-empty):
-- Overview doc: `llm-gen-wiki/<NN>-<topic-id>.md`, `is_overview: true`
-- Per subtopic (letter sequence a, b, c, …): `llm-gen-wiki/<NN><letter>-<subtopic-slug>.md`, `is_overview: false`
-  - `<subtopic-slug>` is the portion of the subtopic id **after** the `--` separator
-
-**Topic WITHOUT subtopics** (`subtopics: []`):
-- Full doc: `llm-gen-wiki/<NN>-<topic-id>.md`, `is_overview: false`
-
-**Example** (3 topics; topic 1 has 2 subtopics, topics 2 and 3 have none):
-
+```bash
+python3 <wiki-gen-skill-dir>/compute_docs.py
 ```
-llm-gen-wiki/01-system-architecture.md         is_overview: true
-llm-gen-wiki/01a-frontend-architecture.md      is_overview: false
-llm-gen-wiki/01b-backend-architecture.md       is_overview: false
-llm-gen-wiki/02-prompt-engineering.md          is_overview: false
-llm-gen-wiki/03-configuration.md               is_overview: false
-```
+
+The script reads `llm-gen-wiki/plan.yml`, validates topic ids, and writes `llm-gen-wiki/documents.json`. Read that JSON file and use it as the source of truth for Step 5. Each document job contains `topic_title`, `topic_description`, `relevant_files`, absolute `output_file`, `is_overview`, and `business_context`.
 
 ## Step 5 — Dispatch Writing Subagents in Parallel
 
-Dispatch **all** writing subagents in a **single Agent batch call** — one Agent tool invocation per document, all sent simultaneously (not sequentially).
+Dispatch **all** writing subagents in a **single Agent batch call** — one Agent tool invocation per document job in `llm-gen-wiki/documents.json`, all sent simultaneously (not sequentially).
 
 Each subagent is invoked with the `wiki-write-topic` skill and receives:
 
 | Input | Value |
 |---|---|
-| `topic_title` | Topic or subtopic title from `llm-gen-wiki/plan.yml` |
-| `topic_description` | Topic or subtopic description from `llm-gen-wiki/plan.yml` |
-| `relevant_files` | Topic-level `relevant_files` for overview docs; subtopic-level `relevant_files` for subtopic docs |
+| `topic_title` | `topic_title` from the document job |
+| `topic_description` | `topic_description` from the document job |
+| `relevant_files` | `relevant_files` from the document job |
 | `repo_root` | Absolute path to the current working directory |
-| `output_file` | Absolute path computed in Step 4 (e.g. `/abs/path/llm-gen-wiki/01-system-architecture.md`) |
-| `is_overview` | Boolean computed in Step 4 |
+| `output_file` | Absolute `output_file` from the document job |
+| `is_overview` | Boolean `is_overview` from the document job |
 | `generated_at` | Value from Step 0 |
 | `branch` | Value from Step 0 |
 | `commit_hash` | Value from Step 0 |
 | `origin_url` | Value from Step 0 |
 | `repo_type` | Value from Step 0 |
 | `scope_prefix` | Value from Step 0 |
-| `business_context` | The topic's `business_context` from `llm-gen-wiki/plan.yml`; for subtopic docs, use the subtopic's `business_context` if present, otherwise fall back to the parent topic's `business_context`; empty string `""` if neither is present |
+| `business_context` | `business_context` from the document job |
 
 Wait for all subagents to complete before proceeding.
 
 ## Step 6 — Write `llm-gen-wiki/index.md`
 
-After all subagents complete, write `llm-gen-wiki/index.md` with the following structure:
+After all subagents complete, run the skill-local `render_index.py` script to rebuild `llm-gen-wiki/index.md` from `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being documented:
 
-```markdown
-# [repo] Wiki
-
-| | |
-|---|---|
-| **Branch** | `[branch]` |
-| **Commit** | `[first 12 chars of commit_hash]` |
-| **Generated** | [generated_at] |
-
-[description from plan.yml top-level `description` field]
-
-## High Priority
-
-1. **[Topic Title](01-topic-id.md)** *(N source files)* — [one-line synthesis note]
-   - [Subtopic Title](01a-subtopic-slug.md) — [subtopic description]
-   - [Subtopic Title](01b-subtopic-slug.md) — [subtopic description]
-
-## Medium Priority
-
-2. **[Topic Title](02-topic-id.md)** *(N source files)* — [one-line synthesis note]
-
-## Low Priority
-
-3. **[Topic Title](03-topic-id.md)** *(N source files)* — [one-line synthesis note]
-
----
-*Generated by llm-gen-repo-wiki*
+```bash
+python3 <wiki-gen-skill-dir>/render_index.py
 ```
-
-Rules:
-- `[repo]` is the `repo` field from `llm-gen-wiki/plan.yml`
-- Topics are grouped into `## High Priority`, `## Medium Priority`, `## Low Priority` H2 sections based on each topic's `importance` field. Omit a section heading entirely if no topics have that importance level.
-- `*(N source files)*` is the count of paths in the topic's `relevant_files` list from `llm-gen-wiki/plan.yml`
-- `[one-line synthesis note]` is the topic's `description` field from `llm-gen-wiki/plan.yml` (use as-is; do not invent a new description)
-- Link hrefs use filenames only (no directory prefix), since `index.md` lives in the same `llm-gen-wiki/` directory
-- Subtopics are indented under their parent topic as a sub-list
-- Topics with no subtopics have no indented sub-list
 
 ## Step 7 — Append to `llm-gen-wiki/log.md`
 
-After writing `llm-gen-wiki/index.md`, append a generation record to `llm-gen-wiki/log.md`.
+After writing `llm-gen-wiki/index.md`, run the skill-local `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the generation record. Keep the current working directory at the repository root being documented:
 
-If `llm-gen-wiki/log.md` does **not** exist, create it with:
-
-```markdown
-# Wiki Generation Log
-
-<!-- append-only: newest entries at bottom -->
-
-## [YYYY-MM-DD] Generation run
-
-- Topics: N (M with subtopics → P documents total)
-- Cross-references: none (run /wiki-crossref to add)
-- Plan: llm-gen-wiki/plan.yml
+```bash
+python3 <wiki-gen-skill-dir>/append_log.py
 ```
-
-If `llm-gen-wiki/log.md` **already exists**, append only the entry block (no header):
-
-```markdown
-## [YYYY-MM-DD] Generation run
-
-- Topics: N (M with subtopics → P documents total)
-- Cross-references: none (run /wiki-crossref to add)
-- Plan: llm-gen-wiki/plan.yml
-```
-
-Where:
-- `YYYY-MM-DD` is today's date
-- `N` is the number of top-level topics in `plan.yml`
-- `M` is the number of those topics that have at least one subtopic
-- `P` is the total number of documents generated (same count used in the Done message)
 
 ## Done
 

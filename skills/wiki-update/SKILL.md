@@ -40,10 +40,10 @@ If either file is missing, stop immediately and tell the user:
 
 ## Step 2 — Refresh Metadata
 
-Run `gen_meta.py` to capture the **current** git state and write `llm-gen-wiki/meta.yml`:
+Run the skill-local `gen_meta.py` script to capture the **current** git state and write `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being updated, and invoke the script by its resolved path inside the `wiki-update` skill directory:
 
 ```bash
-python3 gen_meta.py
+python3 <wiki-update-skill-dir>/gen_meta.py
 ```
 
 Read `llm-gen-wiki/meta.yml` and keep all six values in memory for the rest of this session. Every writing subagent dispatched in this session receives these values, so all regenerated documents will carry the current branch, commit hash, and generation timestamp — not the values from the original wiki-gen run.
@@ -238,43 +238,37 @@ If `generation_notes` is empty, omit the field entirely.
 
 Write the complete updated YAML back to `llm-gen-wiki/plan.yml`.
 
-### Step A5 — Compute Filename(s)
+### Step A5 — Compute Document Jobs
 
-Count total top-level topics in the updated `plan.yml`. The new topic is at position `NN` (1-based, zero-padded to 2 digits).
+Run the skill-local `compute_docs.py` script after updating `plan.yml`. Keep the current working directory at the repository root being updated, and invoke the script by its resolved path inside the `wiki-update` skill directory:
 
-- No subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: false`)
-- With subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: true`) + `llm-gen-wiki/<NN>a-<subtopic-slug>.md`, `<NN>b-...` (`is_overview: false`)
-  - `<subtopic-slug>` is the portion of the subtopic `id` after the `--` separator
+```bash
+python3 <wiki-update-skill-dir>/compute_docs.py
+```
+
+The script writes `llm-gen-wiki/documents.json` for the full current plan. Read that file and select jobs whose `topic_id` or `parent_topic_id` matches the newly added topic id. Each selected job contains `topic_title`, `topic_description` (including `generation_notes` when present), `relevant_files`, absolute `output_file`, `is_overview`, and `business_context`.
 
 ### Step A6 — Dispatch Writing Subagent(s)
 
 Dispatch **all** writing subagents in a **single Agent batch call**.
 
-Each subagent uses the `wiki-write-topic` skill. Build `effective_description` before dispatching:
-
-```
-effective_description = topic description
-if generation_notes is non-empty:
-    effective_description += "\n\nAdditional generation instructions: " + generation_notes
-```
-
-Pass `effective_description` as the `topic_description` input to `wiki-write-topic`. For subtopic docs, similarly append the parent's `generation_notes` (if any) to the subtopic description.
+Each subagent uses the `wiki-write-topic` skill. Use the selected document jobs from `llm-gen-wiki/documents.json` as the source of truth.
 
 | Input | Value |
 |---|---|
-| `topic_title` | Topic or subtopic title |
-| `topic_description` | `effective_description` (as above) |
-| `relevant_files` | Topic-level files for overview docs; subtopic-level files for subtopic docs |
+| `topic_title` | `topic_title` from the document job |
+| `topic_description` | `topic_description` from the document job |
+| `relevant_files` | `relevant_files` from the document job |
 | `repo_root` | Absolute path to current working directory |
-| `output_file` | Absolute path from Step A5 |
-| `is_overview` | Boolean from Step A5 |
+| `output_file` | Absolute `output_file` from the document job |
+| `is_overview` | Boolean `is_overview` from the document job |
 | `generated_at` | From Step 2 |
 | `branch` | From Step 2 |
 | `commit_hash` | From Step 2 |
 | `origin_url` | From Step 2 |
 | `repo_type` | From Step 2 |
 | `scope_prefix` | From Step 2 |
-| `business_context` | Topic's `business_context`; for subtopic docs fall back to parent's if subtopic has none; `""` if neither present |
+| `business_context` | `business_context` from the document job |
 
 Wait for all subagents to complete.
 
@@ -375,23 +369,21 @@ Field presence rule for `generation_notes`: write the field if non-empty; omit i
 
 Write the complete updated YAML back to `llm-gen-wiki/plan.yml` in a **single write** after all replacements are applied.
 
-### Step E4 — Compute Filenames for All Selected Topics
+### Step E4 — Compute Document Jobs for All Selected Topics
 
-For each confirmed topic, find its 1-based position in the updated `plan.yml` (zero-padded to 2 digits = `NN`).
+Run the skill-local `compute_docs.py` script after the batch `plan.yml` update. Keep the current working directory at the repository root being updated:
 
-Apply the same filename logic as Step A5:
-- No subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: false`)
-- With subtopics → `llm-gen-wiki/<NN>-<topic-id>.md` (`is_overview: true`) + lettered subtopic docs (`is_overview: false`)
+```bash
+python3 <wiki-update-skill-dir>/compute_docs.py
+```
 
-Collect the full list of output files across **all** selected topics.
+Read `llm-gen-wiki/documents.json` and collect jobs whose `topic_id` or `parent_topic_id` matches any selected topic id.
 
 ### Step E5 — Dispatch All Writing Subagents in One Parallel Batch
 
 Dispatch **all** writing subagents for **all** selected topics in a **single Agent batch call** — one subagent per document, all sent simultaneously.
 
-For each document, build `effective_description` by appending the topic's `generation_notes` to its `description` (same rule as Step A6). The regenerated documents overwrite existing files at the same paths.
-
-Pass the same 13 inputs as Step A6 to each `wiki-write-topic` subagent, using the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, and `scope_prefix`.
+Pass the same 13 inputs as Step A6 to each `wiki-write-topic` subagent, using the selected document jobs and the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, and `scope_prefix`. The regenerated documents overwrite existing files at the same paths.
 
 Wait for all subagents to complete.
 
@@ -405,91 +397,23 @@ Proceed to **Shared Steps** (Steps S1–S3) with mode = `edit`, topic list = [al
 
 ### Step S1 — Rebuild index.md
 
-After all writing subagents complete, fully rebuild `llm-gen-wiki/index.md` from the current `llm-gen-wiki/plan.yml`.
+After all writing subagents complete, run the skill-local `render_index.py` script to fully rebuild `llm-gen-wiki/index.md` from the current `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being updated:
 
-```markdown
-# [repo] Wiki
-
-| | |
-|---|---|
-| **Branch** | `[branch]` |
-| **Commit** | `[first 12 chars of commit_hash]` |
-| **Generated** | [generated_at] |
-
-[description from plan.yml top-level `description` field]
-
-## High Priority
-
-1. **[Topic Title](01-topic-id.md)** *(N source files)* — [topic description]
-   - [Subtopic Title](01a-subtopic-slug.md) — [subtopic description]
-
-## Medium Priority
-
-2. **[Topic Title](02-topic-id.md)** *(N source files)* — [topic description]
-
-## Low Priority
-
-3. **[Topic Title](03-topic-id.md)** *(N source files)* — [topic description]
-
----
-*Generated by llm-gen-repo-wiki*
+```bash
+python3 <wiki-update-skill-dir>/render_index.py
 ```
-
-Rules:
-- `[repo]` is the `repo` field from `plan.yml`
-- Topics are grouped into `## High Priority`, `## Medium Priority`, `## Low Priority` H2 sections. Omit a section heading if no topics have that importance level.
-- `*(N source files)*` is the count of paths in the topic's `relevant_files` list
-- `[topic description]` is the topic's `description` field (use as-is; `generation_notes` is never shown in the index)
-- Link hrefs use filenames only (no directory prefix), since `index.md` lives in the same `llm-gen-wiki/` directory
-- Subtopics indented under their parent; topics without subtopics have no sub-list
-- Number topics sequentially by position in the `topics` array (1-based), regardless of importance grouping
 
 ### Step S2 — Append to log.md
 
-If `llm-gen-wiki/log.md` does not exist, create it with:
+Run the `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the correct add/edit record:
 
-```markdown
-# Wiki Generation Log
+```bash
+# Add mode
+python3 <wiki-update-skill-dir>/append_log.py add <topic-id>
 
-<!-- append-only: newest entries at bottom -->
+# Edit mode
+python3 <wiki-update-skill-dir>/append_log.py edit <topic-id> [<topic-id> ...]
 ```
-
-Then append one entry (whether the file existed or was just created).
-
-**Add mode** (single topic):
-```markdown
-## [YYYY-MM-DD] Added topic: [topic title]
-
-- New documents: [D]
-- Total topics in plan: [T]
-- Files referenced: [F]
-- Plan: llm-gen-wiki/plan.yml
-```
-
-**Edit mode — single topic:**
-```markdown
-## [YYYY-MM-DD] Updated topic: [topic title]
-
-- Regenerated documents: [D]
-- Total topics in plan: [T]
-- Files referenced: [F]
-- Plan: llm-gen-wiki/plan.yml
-```
-
-**Edit mode — multiple topics:**
-```markdown
-## [YYYY-MM-DD] Updated topics: [topic title 1], [topic title 2], ...
-
-- Regenerated documents: [D total across all topics]
-- Total topics in plan: [T]
-- Plan: llm-gen-wiki/plan.yml
-```
-
-Where:
-- `YYYY-MM-DD` is today's date
-- `[D]` = total number of documents written across all topics in this operation
-- `[T]` = total top-level topics in `plan.yml` after all updates
-- `[F]` = total count of `relevant_files` paths across all topics in this operation (omitted from multi-topic entry for brevity)
 
 ### Step S3 — Done
 
