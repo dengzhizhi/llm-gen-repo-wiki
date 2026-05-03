@@ -96,21 +96,48 @@ def bfs_explore(scope_prefix, depth_cap, tree_budget=300):
     for _ in range(depth_cap):
         if not level_dirs or tree_count >= tree_budget:
             break
-        batch = " ".join(f"{d}/" for d in level_dirs)
+
+        # Within each depth level, keep expanding directories that contain only
+        # subdirectories (no files). These "pass-through" dirs don't consume a
+        # depth level — their children are explored in the same iteration.
+        to_expand = list(level_dirs)
         next_dirs = []
-        for line in run(f"git ls-tree HEAD -- {batch}").splitlines():
-            parts = line.split(None, 3)
-            if len(parts) < 4:
-                continue
-            etype, path = parts[1], parts[3]
-            name = Path(path).name
-            if etype == "blob":
-                entries.append({"path": path, "type": "file"})
-            elif etype == "tree":
-                tree_count += 1
-                if not should_skip(name):
-                    next_dirs.append(path)
-                    entries.append({"path": path, "type": "dir"})
+
+        while to_expand and tree_count < tree_budget:
+            batch = " ".join(f"{d}/" for d in to_expand)
+            dir_has_file = {d: False for d in to_expand}
+            dir_children = {d: [] for d in to_expand}
+
+            for line in run(f"git ls-tree HEAD -- {batch}").splitlines():
+                parts = line.split(None, 3)
+                if len(parts) < 4:
+                    continue
+                etype, path = parts[1], parts[3]
+                name = Path(path).name
+                parent = str(Path(path).parent)
+                if etype == "blob":
+                    entries.append({"path": path, "type": "file"})
+                    if parent in dir_has_file:
+                        dir_has_file[parent] = True
+                elif etype == "tree":
+                    tree_count += 1
+                    if not should_skip(name):
+                        if parent in dir_children:
+                            dir_children[parent].append(path)
+                        entries.append({"path": path, "type": "dir"})
+
+            pass_through = []
+            for d in to_expand:
+                children = dir_children[d]
+                if children and not dir_has_file[d]:
+                    # Only subdirs, no files — explore children at the same depth level.
+                    pass_through.extend(children)
+                else:
+                    # Has files (or is a leaf) — children go to the next depth level.
+                    next_dirs.extend(children)
+
+            to_expand = pass_through
+
         level_dirs = next_dirs
         if tree_count >= tree_budget:
             break
