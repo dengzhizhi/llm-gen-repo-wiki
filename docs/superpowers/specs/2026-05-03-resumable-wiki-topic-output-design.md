@@ -47,6 +47,13 @@ Only pending jobs should receive a new `wiki-write-topic` subagent dispatch.
 
 This allows a later rerun of `wiki-gen` to resume from previously written chapter files without introducing a second state-tracking mechanism.
 
+Resume semantics are intentionally narrow:
+
+- they apply when rerunning generation for the same already-approved plan
+- they are meant to recover from interrupted chapter generation, not to preserve outputs across plan edits
+
+If the user edits `llm-gen-wiki/plan.yml` before approving the rerun, `wiki-gen` should conservatively treat all chapter jobs in the newly computed `llm-gen-wiki/documents.json` as pending, even if matching output files already exist. That avoids incorrectly reusing stale chapter files after topic, scope, or output-path changes.
+
 ### Atomic Chapter Writes
 
 `wiki-write-topic` should write chapter files atomically.
@@ -57,6 +64,14 @@ The write flow should be:
 2. replace the final `output_file` path with the temporary file only after the document is complete
 
 This prevents a hard break during the write from leaving a truncated chapter file at the final path, which would otherwise be misclassified as finished on rerun.
+
+The implementation should use a helper that performs:
+
+1. create a sibling temporary path derived from `output_file`, for example `output_file + ".tmp"`
+2. write the full document content to that temporary path
+3. atomically replace `output_file` with the temporary path using a filesystem-level replace operation such as Python `os.replace(...)`
+
+The helper should own the atomic write so the skill contract is precise and does not depend on an interactive editor-style tool behavior.
 
 ### Failure Model
 
@@ -80,6 +95,8 @@ If the orchestrator hard-breaks before those steps, rerunning `wiki-gen` should 
 - append or repair `log.md`
 
 This keeps durable recovery scoped to the chapter documents that actually require expensive subagent work.
+
+`log.md` should remain append-only for completed generation runs. An interrupted run that never reaches the final logging step should leave no new completed-run entry. A successful recovery rerun may append a new completion record for that rerun after all required chapter jobs, `index.md`, and log generation steps succeed.
 
 ### Scope Of Changes
 
