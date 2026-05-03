@@ -20,66 +20,70 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 ## Process
 
-### Pass 1 — Repository Scan
+### Pass 1 — Meta Scan and Topic Formation
 
-1. **Run the scan script** — Execute the skill-local `scan_repo.py` script. Keep the current working directory at `repo_root`:
+**Step 1 — Run the meta scan.**  Keep the current working directory at `repo_root`:
 
-   ```bash
-   python3 <wiki-plan-skill-dir>/scan_repo.py --scope-prefix "<scope_prefix>"
-   ```
+```bash
+python3 <wiki-plan-skill-dir>/scan_meta.py --scope-prefix "<scope_prefix>"
+```
 
-   Omit `--scope-prefix` when `scope_prefix` is empty. The script performs all BFS tree exploration, file sizing, signature extraction, git activity ranking, and key file reads in one pass, then writes `llm-gen-wiki/scan.json`.
+Omit `--scope-prefix` when `scope_prefix` is empty. The script does BFS tree exploration, counts line sizes for every file, ranks files by git activity, and reads up to 5 key entry-point / manifest files. It writes `llm-gen-wiki/scan_meta.json`.
 
-2. **Read `llm-gen-wiki/scan.json`** — This is your primary knowledge source for all subsequent steps. The file contains:
+**Step 2 — Read `llm-gen-wiki/scan_meta.json`.** This is your structural knowledge base.
 
-   | Field | Contents |
-   |---|---|
-   | `repo` | Repository directory name |
-   | `detected_language` | Primary language detected from root manifests |
-   | `depth_cap_used` | BFS depth actually used |
-   | `tree` | Flat list of all discovered `{path, type}` entries |
-   | `file_sizes` | Line count per file path |
-   | `git_activity` | Top 40 files ranked by commit count (last 6 months) |
-   | `git_ranks` | Rank position (1 = most active) per file path |
-   | `signatures` | Class/function/type declaration lines for 151–500 line files |
-   | `key_file_contents` | Full content of up to 5 entry point / manifest files |
-   | `key_files_read` | Which key files were read |
-   | `jvm_source_fallback` | Flat `git ls-files` list for JVM projects when BFS missed source |
+| Field | Contents |
+|---|---|
+| `repo` | Repository directory name |
+| `detected_language` | Primary language detected from root manifests |
+| `tree` | Flat list of all discovered `{path, type}` entries |
+| `file_sizes` | Line count per file path |
+| `git_activity` | Top 40 files ranked by commit count (last 6 months) |
+| `git_ranks` | Rank position (1 = most active) per file path |
+| `key_file_contents` | Full content of up to 5 manifest / entry-point files |
+| `key_files_read` | Which key files were included |
+| `jvm_source_fallback` | Flat source list for JVM projects when BFS missed source |
 
-3. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`.
+**Step 3 — Read the README.**  Read `README.md` from `repo_root`. Fall back to `README.rst`, then `README.txt` if absent.
 
-4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused:
-   - Find integration or end-to-end test files from the `tree` in scan.json (names containing `integration`, `e2e`, or `acceptance`, or paths directly under `test/` or `tests/`). Read up to 3 of these — they reveal system boundaries better than any README.
-   - Check `git_activity` in scan.json: the top 5 most-committed files are almost always the architectural core. Read any of these ≤ 150 lines that you have not already examined.
+**Step 4 — Fallback when README is weak.**  If docs are sparse or marketing-only:
+- From `tree` in scan_meta.json, find integration or e2e test files (names containing `integration`, `e2e`, or `acceptance`, or paths under `test/` / `tests/`). Read up to 3 — they reveal system boundaries better than any README.
+- From `git_activity`, identify the top 5 most-committed files. Read any with `file_sizes ≤ 150` that you have not already examined.
 
-5. **Draft an internal topic outline** — Using the tree structure, signatures, git_ranks, and key_file_contents from scan.json, produce an internal candidate topic set sized to repository complexity. Prioritise architecture-first topics: system boundaries, runtime paths, key modules, data flow, infrastructure/runtime configuration, integrations, testing strategy, and major cross-cutting concerns. This draft is internal only — do not write it to disk.
+**Step 5 — Form candidate topics and select files for deep analysis.**
+
+Using the `tree`, `git_ranks`, `file_sizes`, and `key_file_contents` from scan_meta.json, produce an internal draft topic set (do not write to disk). For each draft topic, select **3–7 candidate files** using this priority order:
+
+1. Files with the lowest `git_rank` within the topic's directory domain
+2. Files whose names most closely match the topic (e.g. `auth.py` for an authentication topic)
+3. Files in the topic's directory with `file_sizes ≤ 150` (cheapest to read fully)
+4. Data model or schema files in the topic's domain
+5. Supporting files
+
+Collect all selected paths across all topics into a **flat deduplicated list**. Aim for 20–40 paths total; exclude files already read as key files.
 
 ---
 
 ### Pass 2 — Targeted Deep Read
 
-6. **Read domain files per topic** — For each candidate topic, use scan.json to select 3–5 files. Apply this priority order:
-   1. The entry point or public API surface for the topic (lowest `git_rank` in that domain)
-   2. Other files for this topic that appear in `git_activity`
-   3. Core logic files whose names most closely match the topic domain
-   4. Data model or schema files
-   5. Supporting implementation files
+**Step 6 — Run the detail scan** with the candidate file list from Step 5:
 
-   **Use scan.json data before issuing any Read calls:**
-   - If the file has `signatures` in scan.json → its structure is already known; use those signatures to understand the file without reading it, unless business-context detail is needed.
-   - If `file_sizes[path] ≤ 150` → read fully (cheap).
-   - If `file_sizes[path] > 500` → do **not** read. If signatures indicate it is the most important file in the topic domain, add it to `open_questions` as a file the writer subagent must read in full.
+```bash
+python3 <wiki-plan-skill-dir>/scan_detail.py <file1> <file2> <file3> ...
+```
 
-   The goals are to:
-   - Populate accurate `relevant_files` lists
-   - Understand what each feature does at the implementation level
-   - Understand *why* each feature exists from a product/business perspective
-   - Infer the likely technical audience and document goal for each topic
+The script reads `llm-gen-wiki/scan_meta.json` for the detected language, then for each file applies the appropriate strategy based on line count and writes `llm-gen-wiki/scan_detail.json`.
 
-   **Read budget:** issue at most **20 additional Read calls** beyond what the scan script already read. When the budget is running low:
-   - Ensure every topic has at least 1 file examined
-   - Prioritize high-importance topics over medium, medium over low
-   - Drop step-5 supporting files before dropping higher-priority ones
+**Step 7 — Read `llm-gen-wiki/scan_detail.json`.**  For each file the `strategy` field determines what is available:
+
+| `strategy` | What the entry contains | How to use it |
+|---|---|---|
+| `full` | Complete file content in `content` | Read directly — no Read tool call needed |
+| `signatures` | Class/function/type declarations in `signatures` | Use signatures to understand structure; sufficient for `relevant_files` and most `business_context` |
+| `signatures_only` | Signatures only; file > 500 lines | Add to topic's `open_questions` for writer subagent to read in full |
+| `not_found` | File did not exist | Remove from `relevant_files` |
+
+**Step 8 — Targeted supplemental reads.** For any file where `scan_detail.json` provides signatures but not enough detail to write a confident `business_context`, issue a Read call. Budget: **at most 10 additional Read calls** total across all topics. Prioritise high-importance topics first.
 
 ### Pass 3 — Coverage Audit And Boundary Check
 
