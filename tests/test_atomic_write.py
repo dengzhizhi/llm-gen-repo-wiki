@@ -53,6 +53,25 @@ class AtomicWriteTest(unittest.TestCase):
         self.assertTrue(str(src_arg).endswith(".tmp"))
         self.assertEqual(Path(dst_arg), output_path)
 
+    def test_allows_empty_content_for_callers_that_choose_it(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "chapter.md"
+
+            ATOMIC_WRITE.write_text_atomically(output_path, "")
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(output_path.read_text(), "")
+
+    def test_failed_replace_leaves_existing_output_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "chapter.md"
+            output_path.write_text("old\n")
+            with mock.patch("os.replace", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    ATOMIC_WRITE.write_text_atomically(output_path, "new\n")
+
+            self.assertEqual(output_path.read_text(), "old\n")
+
 
 if __name__ == "__main__":
     unittest.main()
