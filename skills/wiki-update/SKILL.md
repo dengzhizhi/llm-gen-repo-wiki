@@ -107,6 +107,7 @@ You are a wiki topic discovery agent. Your job is to find the source files most 
 <inputs>
 - `repo_root`: [absolute path to the current working directory]
 - `scope_prefix`: [value from meta.yml]
+- `language`: [value from Step 2]
 - `topic_title`: [value from Step A1]
 - `topic_description`: [value from Step A1, may be empty string]
 - `topic_importance`: [value from Step A1]
@@ -145,8 +146,8 @@ Read up to **20 files** total that are likely related to `topic_title` and `hint
 
 - `id`: unique kebab-case slug from `topic_title`; append `-2` etc. if it collides with an existing id
 - `title`: `topic_title` as provided
-- `description`: use `topic_description` if non-empty; otherwise infer a one-sentence description from what you read
-- `business_context`: one sentence answering "What problem does this solve for users?" — derive from source files only; empty string `""` if no clear signal
+- `description`: use `topic_description` if non-empty; otherwise infer a one-sentence description from what you read; write in `language`
+- `business_context`: one sentence answering "What problem does this solve for users?" — derive from source files only; write in `language`; empty string `""` if no clear signal
 - `importance`: `topic_importance`
 - `user_requested`: `true`
 - `relevant_files`: 3–15 verified paths relative to `repo_root`

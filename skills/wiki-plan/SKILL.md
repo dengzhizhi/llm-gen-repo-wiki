@@ -16,6 +16,7 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 | `repo_root` | string | Absolute path to the root of the repository being documented |
 | `extra_topics` | list of strings (optional) | Additional topic titles explicitly requested by the user; these MUST appear in the plan with `user_requested: true` |
 | `scope_prefix` | string | Path of `repo_root` relative to the git root; empty string `""` when `repo_root` is the git root |
+| `language` | string | Human-readable language for all wiki content, e.g. `English`, `Japanese`, `Simplified Chinese`. Default: `English` |
 
 ## Process
 
@@ -166,6 +167,7 @@ Your goal is to produce a well-organised, hierarchical wiki plan that covers eve
   - `diagram_candidates` — optional list of diagram ideas worth rendering later
   - `coverage_tags` — optional list of short labels for the system concerns this topic covers
   - `open_questions` — optional list of unresolved topic-specific questions
+- All human-readable string fields — `description` (repo-level and per-topic), `title`, `business_context`, `planning_warnings` entries, `planning_questions` entries, and subtopic `description` — MUST be written in `{language}`. Technical identifiers (`id`, `relevant_files` paths, `coverage_tags` labels, field keys) remain in English regardless of language.
 - Output ONLY the YAML content — no preamble, no commentary, no markdown code fences. The very first character of your output must be `r` (the start of `repo:`).
 </guidelines>
 

@@ -70,6 +70,7 @@ Dispatch a subagent using the `wiki-plan` skill with the following inputs:
 | `repo_root` | Absolute path to the current working directory |
 | `extra_topics` | The list collected in Step 1 (empty if the user skipped) |
 | `scope_prefix` | Value from Step 0 |
+| `language` | Value from Step 0 |
 
 Wait for the subagent to complete. It will write `llm-gen-wiki/plan.yml`.
 
