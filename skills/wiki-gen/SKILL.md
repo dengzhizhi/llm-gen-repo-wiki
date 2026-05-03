@@ -96,8 +96,8 @@ Planning warnings:
   - [warning]
 
 Planning questions:
-  - [question]
-  - [question]
+  1. [question]
+  2. [question]
 
 Total documents to generate: N
 
