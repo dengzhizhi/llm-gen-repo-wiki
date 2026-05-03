@@ -40,7 +40,9 @@ The script writes `llm-gen-wiki/meta.yml` with these seven fields:
 - `scope_prefix` — path from git root to cwd (empty string if cwd is the git root)
 - `language` — human-readable document language such as `English`, `Japanese`, or `Simplified Chinese`
 
-Read `llm-gen-wiki/meta.yml` and keep all seven values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
+If `llm-gen-wiki/meta.yml` already exists before regenerating it, read the previous values for `branch`, `commit_hash`, `origin_url`, `repo_type`, `scope_prefix`, and `language` and keep them in memory as the previous stable metadata fingerprint. Ignore `generated_at` for resume decisions because it changes on every run.
+
+Read the newly written `llm-gen-wiki/meta.yml` and keep all seven values in memory for the rest of this session — they are passed to every subagent in Steps 2 and 5.
 
 ## Re-run Behaviour
 
@@ -55,10 +57,11 @@ test -f llm-gen-wiki/plan.yml && echo "exists" || echo "not found"
 
 If `llm-gen-wiki/plan.yml` already exists when you enter Step 3, capture a hash of the file contents before starting the interactive review loop. After the user eventually types `ok`, compute the hash again.
 
-- If the hashes are the same, treat this as a same-plan rerun and enable resume skipping in Step 5.
-- If the hashes differ, treat this as a changed-plan rerun and disable resume skipping in Step 5.
+- If the hashes are the same, compare the previous stable metadata fingerprint to the current stable metadata fingerprint from Step 0.
+- Only if both the plan hash and the stable metadata fingerprint match should you treat the run as a same-plan rerun and enable resume skipping in Step 5.
+- If the plan hash differs, or the stable metadata fingerprint differs, treat this as a changed-generation-context rerun and disable resume skipping in Step 5.
 
-Resume skipping is only valid for the same already-approved plan. If the user edits `llm-gen-wiki/plan.yml` or changes it via review commands before approving generation, regenerate all chapter jobs from the updated plan rather than reusing existing chapter files.
+Resume skipping is only valid for the same already-approved plan generated against the same stable repository metadata and language. If the user edits `llm-gen-wiki/plan.yml`, changes it via review commands before approving generation, switches the wiki language, or reruns after the repository metadata changes, regenerate all chapter jobs from the updated generation context rather than reusing existing chapter files.
 
 ## Step 1 — Ask for Extra Topics
 
@@ -174,7 +177,7 @@ The script reads `llm-gen-wiki/plan.yml`, validates topic ids, and writes `llm-g
 
 Choose the document job list for this run before dispatching any writers:
 
-- For a same-plan rerun, run:
+- For a same-plan rerun with matching stable metadata, run:
 
 ```bash
 python3 <wiki-gen-skill-dir>/select_pending_docs.py

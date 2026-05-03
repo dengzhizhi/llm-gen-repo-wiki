@@ -53,14 +53,14 @@ class AtomicWriteTest(unittest.TestCase):
         self.assertTrue(str(src_arg).endswith(".tmp"))
         self.assertEqual(Path(dst_arg), output_path)
 
-    def test_allows_empty_content_for_callers_that_choose_it(self):
+    def test_rejects_empty_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "chapter.md"
 
-            ATOMIC_WRITE.write_text_atomically(output_path, "")
+            with self.assertRaises(ValueError):
+                ATOMIC_WRITE.write_text_atomically(output_path, "")
 
-            self.assertTrue(output_path.exists())
-            self.assertEqual(output_path.read_text(), "")
+            self.assertFalse(output_path.exists())
 
     def test_failed_replace_leaves_existing_output_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -71,6 +71,7 @@ class AtomicWriteTest(unittest.TestCase):
                     ATOMIC_WRITE.write_text_atomically(output_path, "new\n")
 
             self.assertEqual(output_path.read_text(), "old\n")
+            self.assertFalse((output_path.parent / "chapter.md.tmp").exists())
 
 
 if __name__ == "__main__":
