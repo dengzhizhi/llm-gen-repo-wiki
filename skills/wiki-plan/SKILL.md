@@ -20,141 +20,66 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 ## Process
 
-### Pass 1 — Broad Structural Scan
+### Pass 1 — Repository Scan
 
-1. **Discover the file tree (BFS)** — Use the BFS file discovery procedure below to build a structural picture of the repository before reading any files.
-2. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`. If none exist, proceed without a README.
-3. **Read entry points and config files** — Using the file tree gathered in step 1, read at most **5** files total in this priority order:
-   1. Primary package manifest (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`) — reveals dependencies, scripts, and module structure
-   2. Main entry point (`main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`)
-   3. Primary deployment or infrastructure config (`docker-compose.yml`, `serverless.yml`, `terraform/main.tf`, `Makefile`, `application.yml`)
-   4. Secondary entry point only if the repo has clearly distinct runtimes (e.g. both a server and a CLI)
-   5. One additional config file if it reveals significant environment or feature-flag structure
+1. **Run the scan script** — Execute the skill-local `scan_repo.py` script. Keep the current working directory at `repo_root`:
 
-   Count these 5 reads toward the global file budget.
-4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, execute these concrete steps:
-   - Read the top integration or end-to-end test files (names or paths containing `integration`, `e2e`, or `acceptance`, or files directly under a `test/` or `tests/` root directory). These reveal system boundaries and realistic call graphs better than any README.
-   - Grep for route and handler registration to map the request surface:
-     ```bash
-     grep -rn "app\.\(get\|post\|put\|delete\|patch\)\|router\.\|@app\.route\|HandleFunc" --include="*.py" --include="*.ts" --include="*.js" --include="*.go" -l
-     ```
-   - Run the git activity query from step 5a (Pass 2) and read the top 5 most-changed files — these are almost always the architectural core regardless of documentation quality.
-5. **Draft an internal topic outline** — From Pass 1 findings, produce an internal candidate topic set sized to repository complexity. Prioritise architecture-first topics such as system boundaries, runtime paths, key modules, data flow, infrastructure/runtime configuration, integrations, testing strategy, and major cross-cutting concerns. This draft is internal only — do not write it to disk.
-
----
-
-### BFS File Discovery
-
-Use `git ls-tree` to explore the repository structure level by level. All git commands must be run from `repo_root`. The command shows only the **immediate** contents of a directory (never recurses), with each entry classified as `blob` (file), `tree` (directory), or `commit` (submodule — treat as a leaf, do not explore further).
-
-**Directory skip list** — never descend into these regardless of depth or position in the tree:
-`node_modules`, `.git`, `.svn`, `.hg`, `target`, `.terraform`, `third_party`, `dist`, `build`, `out`, `.next`, `.nuxt`, `__pycache__`, `.cache`, `coverage`, `.nyc_output`, `*.egg-info`, `tmp`, `logs`, `storybook-static`, `.idea`, `.vscode`, `.github`, `.circleci`, `.husky`
-
-`vendor` is in the skip list **except** for Go repositories (where `vendor/` contains pinned source dependencies that are legitimately referenced in source).
-
-`scope_prefix` is provided as an input. Because `git ls-tree` output paths are always relative to the git root, they will naturally carry `scope_prefix` as a leading component when it is non-empty.
-
-**Stop conditions** — stop as soon as any one of these is met:
-- No important directories remain to explore
-- Depth has reached the language-adjusted cap (see Language-Aware Depth below)
-- Running **tree count** (total `tree`-type lines across all `git ls-tree` outputs) reaches or exceeds **300**
-
-Blob entries do not count toward the tree budget — only `tree`-type lines do. This prevents flat directories with many source files from exhausting the exploration budget before deeper structure is found.
-
-#### Language-Aware Depth
-
-Before starting Phase 1, check for these root-level files already gathered in Phase 0:
-- `pom.xml`, `build.gradle`, or `build.gradle.kts` present → **JVM project**: raise depth cap to **8** (JVM source trees reach `src/main/java/com/company/product/feature/` before any code files are visible at typical depth limits).
-- `go.mod` present → **Go project**: raise depth cap to **7** (Go modules commonly use `internal/pkg/domain/service/`).
-- Otherwise: depth cap **5**.
-
-For JVM projects, if the tree budget is exhausted before source files become visible, fall back to:
-```bash
-git ls-files -- "*.java" "*.kt" "*.scala" | head -200
-```
-This flat source file list substitutes for incomplete BFS output.
-
-#### Phase 0 — Root (always run)
-
-```bash
-# If scope_prefix is empty:
-git ls-tree HEAD
-
-# If scope_prefix is non-empty:
-git ls-tree HEAD -- <scope_prefix>/
-```
-
-Record every line. Identify:
-- `blob` lines → root-level files (note important ones: READMEs, package manifests, entry points)
-- `tree` lines → level-1 directory candidates
-
-**Apply the skip list to Phase 0 output before advancing to Phase 1.** Only directories not in the skip list proceed. There is no "explore all level-1 dirs unconditionally" exception — `node_modules`, `.git`, and `target` at the root are never explored.
-
-#### Phase 1–5 — BFS Levels
-
-Repeat for L = 1 to the language-adjusted depth cap:
-
-1. Take the set of directory paths selected for this level. If the set is empty, **stop**.
-2. Issue **one Bash call** for the entire set:
    ```bash
-   git ls-tree HEAD -- <dir1>/ <dir2>/ ... <dirN>/
+   python3 <wiki-plan-skill-dir>/scan_repo.py --scope-prefix "<scope_prefix>"
    ```
-3. Count only the `tree`-type output lines; add to the running tree count. If the running tree count equals or exceeds 300, process this output and **stop** — do not proceed to L+1.
-4. From the output, collect all `tree` entries as candidate subdirectories for level L+1.
-5. **Select important subdirectories** — keep a subdirectory if it is likely to contain source code, feature modules, data models, API handlers, infrastructure config, tests, or documentation. Apply the skip list and remove any directory matching it.
-6. The selected paths become the input for level L+1.
+
+   Omit `--scope-prefix` when `scope_prefix` is empty. The script performs all BFS tree exploration, file sizing, signature extraction, git activity ranking, and key file reads in one pass, then writes `llm-gen-wiki/scan.json`.
+
+2. **Read `llm-gen-wiki/scan.json`** — This is your primary knowledge source for all subsequent steps. The file contains:
+
+   | Field | Contents |
+   |---|---|
+   | `repo` | Repository directory name |
+   | `detected_language` | Primary language detected from root manifests |
+   | `depth_cap_used` | BFS depth actually used |
+   | `tree` | Flat list of all discovered `{path, type}` entries |
+   | `file_sizes` | Line count per file path |
+   | `git_activity` | Top 40 files ranked by commit count (last 6 months) |
+   | `git_ranks` | Rank position (1 = most active) per file path |
+   | `signatures` | Class/function/type declaration lines for 151–500 line files |
+   | `key_file_contents` | Full content of up to 5 entry point / manifest files |
+   | `key_files_read` | Which key files were read |
+   | `jvm_source_fallback` | Flat `git ls-files` list for JVM projects when BFS missed source |
+
+3. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`.
+
+4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused:
+   - Find integration or end-to-end test files from the `tree` in scan.json (names containing `integration`, `e2e`, or `acceptance`, or paths directly under `test/` or `tests/`). Read up to 3 of these — they reveal system boundaries better than any README.
+   - Check `git_activity` in scan.json: the top 5 most-committed files are almost always the architectural core. Read any of these ≤ 150 lines that you have not already examined.
+
+5. **Draft an internal topic outline** — Using the tree structure, signatures, git_ranks, and key_file_contents from scan.json, produce an internal candidate topic set sized to repository complexity. Prioritise architecture-first topics: system boundaries, runtime paths, key modules, data flow, infrastructure/runtime configuration, integrations, testing strategy, and major cross-cutting concerns. This draft is internal only — do not write it to disk.
 
 ---
 
 ### Pass 2 — Targeted Deep Read
 
-**5a. Capture git activity signal** — Before reading any topic files, run:
-```bash
-git log --since="6 months ago" --name-only --pretty=format: | sort | uniq -c | sort -rn | head -40
-```
-Keep the resulting ranked file list in memory. Use it in step 6 to prioritize which files to read within each topic domain. If the repository is younger than 6 months, omit `--since`.
-
-6. **Read domain files per topic** — For each candidate topic from Pass 1, identify 3–5 candidate files. Apply this priority order when selecting which files to examine:
-   1. The entry point or public API surface file for the topic area (e.g. a router, service facade, or top-level handler)
-   2. Files for this topic that appear in the git activity ranking from step 5a
-   3. Core logic files whose names are most closely related to the topic domain
+6. **Read domain files per topic** — For each candidate topic, use scan.json to select 3–5 files. Apply this priority order:
+   1. The entry point or public API surface for the topic (lowest `git_rank` in that domain)
+   2. Other files for this topic that appear in `git_activity`
+   3. Core logic files whose names most closely match the topic domain
    4. Data model or schema files
    5. Supporting implementation files
 
-   **Before reading each file, check its size:**
-   ```bash
-   wc -l <file>
-   ```
-
-   Then apply this read strategy based on line count:
-
-   - **≤ 150 lines** — read fully (low token cost, full context worth it)
-   - **151–500 lines** — read the first 80 lines (imports + opening structure) AND run a signature grep to extract the structural skeleton:
-     ```bash
-     # Python
-     grep -n "^class \|^def \|^async def \|^    def " file.py | head -40
-     # TypeScript / JavaScript
-     grep -n "^export\|^class \|^function \|^const .* =\|^interface \|^type " file.ts | head -40
-     # Go
-     grep -n "^type \|^func " file.go | head -40
-     # Java / Kotlin
-     grep -n "^public \|^class \|^interface \|^fun \|^suspend fun " file.java | head -40
-     # Generic fallback
-     grep -n "^class \|^def \|^func \|^function \|^export " file | head -40
-     ```
-   - **> 500 lines** — run the signature grep only (do **not** do a full or partial read). If the grep output strongly suggests this file is the most important in the topic domain, add it to `open_questions` as a file the writer subagent must read in full.
+   **Use scan.json data before issuing any Read calls:**
+   - If the file has `signatures` in scan.json → its structure is already known; use those signatures to understand the file without reading it, unless business-context detail is needed.
+   - If `file_sizes[path] ≤ 150` → read fully (cheap).
+   - If `file_sizes[path] > 500` → do **not** read. If signatures indicate it is the most important file in the topic domain, add it to `open_questions` as a file the writer subagent must read in full.
 
    The goals are to:
    - Populate accurate `relevant_files` lists
    - Understand what each feature does at the implementation level
-   - Understand *why* each feature exists from a product/business perspective (signals come from comments, naming, README references, and the shape of the code)
+   - Understand *why* each feature exists from a product/business perspective
    - Infer the likely technical audience and document goal for each topic
 
-   Total file budget across all passes (including Pass 1 Step 3): soft cap of **50 files examined** (where "examined" means any combination of full read, partial read, or grep). When the budget is running low:
-   - Ensure every topic has at least 1 file examined (always the step-1 entry point)
+   **Read budget:** issue at most **20 additional Read calls** beyond what the scan script already read. When the budget is running low:
+   - Ensure every topic has at least 1 file examined
    - Prioritize high-importance topics over medium, medium over low
-   - Within a topic, drop step-5 supporting files before dropping higher-priority files
-   - Stop earlier for small repos (fewer than 10 candidate topics)
+   - Drop step-5 supporting files before dropping higher-priority ones
 
 ### Pass 3 — Coverage Audit And Boundary Check
 
