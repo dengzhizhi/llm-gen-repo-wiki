@@ -27,7 +27,13 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 3. **Read entry points and config files** — Using the file tree gathered in step 1, identify and read the following files from `repo_root` in priority order:
    - Entry points: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers visible in the tree.
    - Config files: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files visible in the tree.
-4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, lean more heavily on tests, route or handler definitions, package manifests, docs under `docs/`, CI workflows, deployment config, migration names, and comments/docstrings in entry-point or core files.
+4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, execute these concrete steps:
+   - Read the top integration or end-to-end test files (names or paths containing `integration`, `e2e`, or `acceptance`, or files directly under a `test/` or `tests/` root directory). These reveal system boundaries and realistic call graphs better than any README.
+   - Grep for route and handler registration to map the request surface:
+     ```bash
+     grep -rn "app\.\(get\|post\|put\|delete\|patch\)\|router\.\|@app\.route\|HandleFunc" --include="*.py" --include="*.ts" --include="*.js" --include="*.go" -l
+     ```
+   - Run the git activity query from step 5a (Pass 2) and read the top 5 most-changed files — these are almost always the architectural core regardless of documentation quality.
 5. **Draft an internal topic outline** — From Pass 1 findings, produce an internal candidate topic set sized to repository complexity. Prioritise architecture-first topics such as system boundaries, runtime paths, key modules, data flow, infrastructure/runtime configuration, integrations, testing strategy, and major cross-cutting concerns. This draft is internal only — do not write it to disk.
 
 ---
@@ -36,12 +42,32 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 Use `git ls-tree` to explore the repository structure level by level. All git commands must be run from `repo_root`. The command shows only the **immediate** contents of a directory (never recurses), with each entry classified as `blob` (file), `tree` (directory), or `commit` (submodule — treat as a leaf, do not explore further).
 
-`scope_prefix` is provided as an input. Because `git ls-tree` output paths are always relative to the git root, they will naturally carry `scope_prefix` as a leading component when it is non-empty — so phases 1–5 need no special adjustment once Phase 0 is scoped correctly.
+**Directory skip list** — never descend into these regardless of depth or position in the tree:
+`node_modules`, `.git`, `.svn`, `.hg`, `target`, `.terraform`, `third_party`, `dist`, `build`, `out`, `.next`, `.nuxt`, `__pycache__`, `.cache`, `coverage`, `.nyc_output`, `*.egg-info`, `tmp`, `logs`, `storybook-static`, `.idea`, `.vscode`, `.github`, `.circleci`, `.husky`
+
+`vendor` is in the skip list **except** for Go repositories (where `vendor/` contains pinned source dependencies that are legitimately referenced in source).
+
+`scope_prefix` is provided as an input. Because `git ls-tree` output paths are always relative to the git root, they will naturally carry `scope_prefix` as a leading component when it is non-empty.
 
 **Stop conditions** — stop as soon as any one of these is met:
 - No important directories remain to explore
-- Depth has reached level 5
-- Running **entry count** (total lines across all `git ls-tree` outputs) reaches or exceeds **600**
+- Depth has reached the language-adjusted cap (see Language-Aware Depth below)
+- Running **tree count** (total `tree`-type lines across all `git ls-tree` outputs) reaches or exceeds **300**
+
+Blob entries do not count toward the tree budget — only `tree`-type lines do. This prevents flat directories with many source files from exhausting the exploration budget before deeper structure is found.
+
+#### Language-Aware Depth
+
+Before starting Phase 1, check for these root-level files already gathered in Phase 0:
+- `pom.xml`, `build.gradle`, or `build.gradle.kts` present → **JVM project**: raise depth cap to **8** (JVM source trees reach `src/main/java/com/company/product/feature/` before any code files are visible at typical depth limits).
+- `go.mod` present → **Go project**: raise depth cap to **7** (Go modules commonly use `internal/pkg/domain/service/`).
+- Otherwise: depth cap **5**.
+
+For JVM projects, if the tree budget is exhausted before source files become visible, fall back to:
+```bash
+git ls-files -- "*.java" "*.kt" "*.scala" | head -200
+```
+This flat source file list substitutes for incomplete BFS output.
 
 #### Phase 0 — Root (always run)
 
@@ -53,37 +79,54 @@ git ls-tree HEAD
 git ls-tree HEAD -- <scope_prefix>/
 ```
 
-Record every line as one entry; add to running total. Identify:
+Record every line. Identify:
 - `blob` lines → root-level files (note important ones: READMEs, package manifests, entry points)
 - `tree` lines → level-1 directory candidates
 
-**All** level-1 directories proceed to Phase 1 — there is no content yet to judge importance on, so explore all of them.
+**Apply the skip list to Phase 0 output before advancing to Phase 1.** Only directories not in the skip list proceed. There is no "explore all level-1 dirs unconditionally" exception — `node_modules`, `.git`, and `target` at the root are never explored.
 
 #### Phase 1–5 — BFS Levels
 
-Repeat for L = 1 to 5:
+Repeat for L = 1 to the language-adjusted depth cap:
 
 1. Take the set of directory paths selected for this level. If the set is empty, **stop**.
-2. Issue **one Bash call** for the entire set. Directory paths come directly from the previous phase's `git ls-tree` output and already include `scope_prefix`:
+2. Issue **one Bash call** for the entire set:
    ```bash
    git ls-tree HEAD -- <dir1>/ <dir2>/ ... <dirN>/
    ```
-3. Count the output lines; add to running total. If the running total now equals or exceeds 600, process this output and then **stop** — do not proceed to L+1.
+3. Count only the `tree`-type output lines; add to the running tree count. If the running tree count equals or exceeds 300, process this output and **stop** — do not proceed to L+1.
 4. From the output, collect all `tree` entries as candidate subdirectories for level L+1.
-5. **Select important subdirectories** — mark a subdirectory as important if it is likely to contain source code, feature modules, data models, API handlers, infrastructure config, tests, or documentation. **Skip** directories whose names indicate generated or ephemeral output: `dist`, `build`, `out`, `.next`, `__pycache__`, `.cache`, `coverage`, `*.egg-info`, `tmp`, `logs`, `vendor` (skip unless the language idiom requires it, e.g. Go).
+5. **Select important subdirectories** — keep a subdirectory if it is likely to contain source code, feature modules, data models, API handlers, infrastructure config, tests, or documentation. Apply the skip list and remove any directory matching it.
 6. The selected paths become the input for level L+1.
 
 ---
 
 ### Pass 2 — Targeted Deep Read
 
-6. **Read domain files per topic** — For each candidate topic from Pass 1, identify and read 3–5 files in that domain: core logic files, data models, key API handlers, service classes, or similar. The goals are to:
+**5a. Capture git activity signal** — Before reading any topic files, run:
+```bash
+git log --since="6 months ago" --name-only --pretty=format: | sort | uniq -c | sort -rn | head -40
+```
+Keep the resulting ranked file list in memory. Use it in step 6 to prioritize which files to read within each topic domain. If the repository is younger than 6 months, omit `--since`.
+
+6. **Read domain files per topic** — For each candidate topic from Pass 1, identify and read 3–5 files. Apply this priority order when selecting which files to read for a topic:
+   1. The entry point or public API surface file for the topic area (e.g. a router, service facade, or top-level handler)
+   2. Files for this topic that appear in the git activity ranking from step 5a
+   3. Core logic files whose names are most closely related to the topic domain
+   4. Data model or schema files
+   5. Supporting implementation files
+
+   The goals are to:
    - Populate accurate `relevant_files` lists
    - Understand what each feature does at the implementation level
    - Understand *why* each feature exists from a product/business perspective (signals come from comments, naming, README references, and the shape of the code)
    - Infer the likely technical audience and document goal for each topic
 
-   Total file budget across both passes: soft cap of **40 files**. Stop earlier for small repos.
+   Total file budget across both passes: soft cap of **50 files**. When the budget is running low, apply this tiebreaker:
+   - Ensure every topic has at least 1 file read (always the step-1 entry point)
+   - Prioritize high-importance topics over medium, medium over low
+   - Within a topic, cut step-5 supporting files before cutting higher-priority files
+   - Stop earlier for small repos (fewer than 10 candidate topics)
 
 ### Pass 3 — Coverage Audit And Boundary Check
 
