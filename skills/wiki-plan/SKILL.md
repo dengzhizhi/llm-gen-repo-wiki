@@ -24,9 +24,14 @@ This skill is invoked as a subagent by the `wiki` orchestrator skill. It receive
 
 1. **Discover the file tree (BFS)** — Use the BFS file discovery procedure below to build a structural picture of the repository before reading any files.
 2. **Read the README** — Read `README.md` from `repo_root`. If it does not exist, fall back to `README.rst`, then `README.txt`. If none exist, proceed without a README.
-3. **Read entry points and config files** — Using the file tree gathered in step 1, identify and read the following files from `repo_root` in priority order:
-   - Entry points: `main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`, and similar top-level launchers visible in the tree.
-   - Config files: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `docker-compose.yml`, `.env.example`, `Makefile`, `settings.py`, `config.py`, `application.yml`, `config.yml`, and any other top-level configuration files visible in the tree.
+3. **Read entry points and config files** — Using the file tree gathered in step 1, read at most **5** files total in this priority order:
+   1. Primary package manifest (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`) — reveals dependencies, scripts, and module structure
+   2. Main entry point (`main.py`, `index.ts`, `app.py`, `app.ts`, `server.py`, `main.go`, `cmd/main.go`, `cli.py`, `index.js`)
+   3. Primary deployment or infrastructure config (`docker-compose.yml`, `serverless.yml`, `terraform/main.tf`, `Makefile`, `application.yml`)
+   4. Secondary entry point only if the repo has clearly distinct runtimes (e.g. both a server and a CLI)
+   5. One additional config file if it reveals significant environment or feature-flag structure
+
+   Count these 5 reads toward the global file budget.
 4. **Fallback when README is weak** — If top-level docs are sparse, absent, or overly marketing-focused, execute these concrete steps:
    - Read the top integration or end-to-end test files (names or paths containing `integration`, `e2e`, or `acceptance`, or files directly under a `test/` or `tests/` root directory). These reveal system boundaries and realistic call graphs better than any README.
    - Grep for route and handler registration to map the request surface:
@@ -109,12 +114,35 @@ git log --since="6 months ago" --name-only --pretty=format: | sort | uniq -c | s
 ```
 Keep the resulting ranked file list in memory. Use it in step 6 to prioritize which files to read within each topic domain. If the repository is younger than 6 months, omit `--since`.
 
-6. **Read domain files per topic** — For each candidate topic from Pass 1, identify and read 3–5 files. Apply this priority order when selecting which files to read for a topic:
+6. **Read domain files per topic** — For each candidate topic from Pass 1, identify 3–5 candidate files. Apply this priority order when selecting which files to examine:
    1. The entry point or public API surface file for the topic area (e.g. a router, service facade, or top-level handler)
    2. Files for this topic that appear in the git activity ranking from step 5a
    3. Core logic files whose names are most closely related to the topic domain
    4. Data model or schema files
    5. Supporting implementation files
+
+   **Before reading each file, check its size:**
+   ```bash
+   wc -l <file>
+   ```
+
+   Then apply this read strategy based on line count:
+
+   - **≤ 150 lines** — read fully (low token cost, full context worth it)
+   - **151–500 lines** — read the first 80 lines (imports + opening structure) AND run a signature grep to extract the structural skeleton:
+     ```bash
+     # Python
+     grep -n "^class \|^def \|^async def \|^    def " file.py | head -40
+     # TypeScript / JavaScript
+     grep -n "^export\|^class \|^function \|^const .* =\|^interface \|^type " file.ts | head -40
+     # Go
+     grep -n "^type \|^func " file.go | head -40
+     # Java / Kotlin
+     grep -n "^public \|^class \|^interface \|^fun \|^suspend fun " file.java | head -40
+     # Generic fallback
+     grep -n "^class \|^def \|^func \|^function \|^export " file | head -40
+     ```
+   - **> 500 lines** — run the signature grep only (do **not** do a full or partial read). If the grep output strongly suggests this file is the most important in the topic domain, add it to `open_questions` as a file the writer subagent must read in full.
 
    The goals are to:
    - Populate accurate `relevant_files` lists
@@ -122,10 +150,10 @@ Keep the resulting ranked file list in memory. Use it in step 6 to prioritize wh
    - Understand *why* each feature exists from a product/business perspective (signals come from comments, naming, README references, and the shape of the code)
    - Infer the likely technical audience and document goal for each topic
 
-   Total file budget across both passes: soft cap of **50 files**. When the budget is running low, apply this tiebreaker:
-   - Ensure every topic has at least 1 file read (always the step-1 entry point)
+   Total file budget across all passes (including Pass 1 Step 3): soft cap of **50 files examined** (where "examined" means any combination of full read, partial read, or grep). When the budget is running low:
+   - Ensure every topic has at least 1 file examined (always the step-1 entry point)
    - Prioritize high-importance topics over medium, medium over low
-   - Within a topic, cut step-5 supporting files before cutting higher-priority files
+   - Within a topic, drop step-5 supporting files before dropping higher-priority files
    - Stop earlier for small repos (fewer than 10 candidate topics)
 
 ### Pass 3 — Coverage Audit And Boundary Check
