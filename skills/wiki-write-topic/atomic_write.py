@@ -7,8 +7,8 @@ from pathlib import Path
 
 def write_text_atomically(output_path, content):
     output_path = Path(output_path)
-    if content == "":
-        raise ValueError("content must be non-empty")
+    if content.strip() == "":
+        raise ValueError("content must contain non-whitespace text")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.with_name(output_path.name + ".tmp")
     temp_path.write_text(content)

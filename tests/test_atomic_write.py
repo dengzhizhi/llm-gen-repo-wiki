@@ -62,6 +62,15 @@ class AtomicWriteTest(unittest.TestCase):
 
             self.assertFalse(output_path.exists())
 
+    def test_rejects_whitespace_only_content(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "chapter.md"
+
+            with self.assertRaises(ValueError):
+                ATOMIC_WRITE.write_text_atomically(output_path, " \n\t")
+
+            self.assertFalse(output_path.exists())
+
     def test_failed_replace_leaves_existing_output_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "chapter.md"
