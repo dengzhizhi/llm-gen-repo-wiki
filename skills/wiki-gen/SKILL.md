@@ -53,6 +53,13 @@ test -f llm-gen-wiki/plan.yml && echo "exists" || echo "not found"
 - If it **exists**: skip Steps 1 and 2, go directly to Step 3
 - If it **does not exist**: proceed from Step 1
 
+If `llm-gen-wiki/plan.yml` already exists when you enter Step 3, capture a hash of the file contents before starting the interactive review loop. After the user eventually types `ok`, compute the hash again.
+
+- If the hashes are the same, treat this as a same-plan rerun and enable resume skipping in Step 5.
+- If the hashes differ, treat this as a changed-plan rerun and disable resume skipping in Step 5.
+
+Resume skipping is only valid for the same already-approved plan. If the user edits `llm-gen-wiki/plan.yml` or changes it via review commands before approving generation, regenerate all chapter jobs from the updated plan rather than reusing existing chapter files.
+
 ## Step 1 — Ask for Extra Topics
 
 Ask the user exactly once:
@@ -165,7 +172,25 @@ The script reads `llm-gen-wiki/plan.yml`, validates topic ids, and writes `llm-g
 
 ## Step 5 — Dispatch Writing Subagents in Parallel
 
-Dispatch **all** writing subagents in a **single Agent batch call** — one Agent tool invocation per document job in `llm-gen-wiki/documents.json`, all sent simultaneously (not sequentially).
+Choose the document job list for this run before dispatching any writers:
+
+- For a same-plan rerun, run:
+
+```bash
+python3 <wiki-gen-skill-dir>/select_pending_docs.py
+```
+
+  This reads `llm-gen-wiki/documents.json` and returns only jobs whose `output_file` is missing or empty.
+
+- For a changed-plan rerun, or any run where the plan was newly created in this session, run:
+
+```bash
+python3 <wiki-gen-skill-dir>/select_pending_docs.py --force-all
+```
+
+  This returns all jobs from `llm-gen-wiki/documents.json` and disables resume skipping for the run.
+
+Dispatch the selected writing subagents in a **single Agent batch call** — one Agent tool invocation per selected document job, all sent simultaneously (not sequentially). If the selected job list is empty, skip directly to Step 6.
 
 Each subagent is invoked with the `wiki-write-topic` skill and receives:
 
@@ -186,7 +211,7 @@ Each subagent is invoked with the `wiki-write-topic` skill and receives:
 | `language` | Value from Step 0 |
 | `business_context` | `business_context` from the document job |
 
-Wait for all subagents to complete before proceeding.
+Wait for all selected subagents to complete before proceeding.
 
 ## Step 6 — Write `llm-gen-wiki/index.md`
 
@@ -208,8 +233,8 @@ python3 <wiki-gen-skill-dir>/append_log.py
 
 After writing `llm-gen-wiki/log.md`, confirm to the user:
 
-> "Wiki generation complete. [N] documents written to `llm-gen-wiki/`. Open `llm-gen-wiki/index.md` to start reading.
+> "Wiki generation complete. [N] documents written or reused in `llm-gen-wiki/`. Open `llm-gen-wiki/index.md` to start reading.
 >
 > Optional: run `/wiki-crossref` to add inline links between documents, or `/wiki-lint` to check for thin documents, orphan concepts, and missing cross-references."
 
-where N is the total number of topic/subtopic documents generated (not counting `index.md`, `log.md`).
+where N is the total number of topic/subtopic documents in the approved plan (not counting `index.md`, `log.md`). On resumed runs, some documents may be reused from an earlier interrupted generation while only the missing chapter jobs are newly dispatched.
