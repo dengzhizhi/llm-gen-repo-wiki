@@ -38,7 +38,13 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 6. **Generate the document** — Follow the Prompt section below exactly to produce the wiki markdown. If `is_overview` is `true`, follow the Overview Mode instructions instead of the full deep-dive.
 7. **Validate Mermaid syntax when possible** — If the document contains Mermaid diagrams, check whether `mmdc` (mermaid-cli) is available. If it is available, dispatch a subagent to validate Mermaid syntax only. The subagent does not need to keep or return rendered image files; it only reports syntax errors that must be fixed before writing.
 8. **Self-audit before writing** — Verify the completed document against the Quality Audit checklist below before writing it.
-9. **Write to `output_file`** — Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document to stdout.
+9. **Persist the completed chapter atomically** — Use the skill-local `atomic_write.py` helper to write the completed markdown document to a sibling temporary path and replace `output_file` only after the full document is ready.
+10. **Confirm only after persistence succeeds** — After the atomic replace succeeds, output exactly one confirmation line: `Written: [output_file]`. Do NOT print the document body to stdout.
+
+The file at `output_file` is the durable success artifact for this subagent.
+
+- If the subagent fails before the atomic replace step, the final `output_file` must not be treated as completed.
+- If the subagent fails after the atomic replace step, the final `output_file` is a valid completed chapter artifact and may be skipped by `wiki-gen` on a same-plan rerun.
 
 ## Prompt
 
@@ -248,4 +254,4 @@ Do NOT produce full deep-dive sections (no detailed architecture breakdowns, no 
 
 ## Output
 
-Write the completed markdown document to `output_file` using the Write tool. Do NOT print the document body to stdout — only write it to the file. After writing, output a single confirmation line: "Written: [output_file]".
+Use the skill-local `atomic_write.py` helper to persist the completed markdown document to `output_file`. Do NOT print the document body to stdout. After the atomic replace succeeds, output a single confirmation line: "Written: [output_file]".
