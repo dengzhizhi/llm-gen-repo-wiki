@@ -193,10 +193,12 @@ python3 <wiki-gen-skill-dir>/select_pending_docs.py --force-all
 
   This returns all jobs from `llm-gen-wiki/documents.json` and disables resume skipping for the run.
 
+Write the selected job list for this run to `llm-gen-wiki/selected-jobs.json`. This file is a transient orchestration artifact used only for wave chunking in the current run.
+
 Run the skill-local chunking helper on the selected job list and process the returned waves in order:
 
 ```bash
-python3 <wiki-gen-skill-dir>/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+python3 <wiki-gen-skill-dir>/chunk_document_jobs.py llm-gen-wiki/selected-jobs.json
 ```
 
 Each returned wave contains at most 6 document jobs. For each wave:

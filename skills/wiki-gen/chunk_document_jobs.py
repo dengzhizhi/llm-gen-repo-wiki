@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 def chunk_jobs(jobs, wave_size=6):
+    if wave_size <= 0:
+        raise ValueError("wave_size must be positive")
     return [jobs[index:index + wave_size] for index in range(0, len(jobs), wave_size)]
 
 

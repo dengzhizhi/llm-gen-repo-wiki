@@ -258,10 +258,12 @@ The script writes `llm-gen-wiki/documents.json` for the full current plan. Read 
 
 ### Step A6 — Dispatch Writing Subagent(s)
 
+Write the selected add-mode job subset to `llm-gen-wiki/selected-jobs.json`. This file is a transient orchestration artifact used only for wave chunking in the current run.
+
 Chunk the selected document jobs into sequential waves of at most 6 jobs using the shared helper:
 
 ```bash
-python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py llm-gen-wiki/selected-jobs.json
 ```
 
 For each returned wave:
@@ -400,10 +402,12 @@ Read `llm-gen-wiki/documents.json` and collect jobs whose `topic_id` or `parent_
 
 ### Step E5 — Dispatch Writing Subagents In Capped Waves
 
+Write the selected edit-mode job subset to `llm-gen-wiki/selected-jobs.json`. This file is a transient orchestration artifact used only for wave chunking in the current run.
+
 Chunk the selected document jobs into sequential waves of at most 6 jobs using the shared helper:
 
 ```bash
-python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py llm-gen-wiki/selected-jobs.json
 ```
 
 Dispatch one Agent batch call per wave, wait for the whole wave to complete, and only then continue to the next wave.

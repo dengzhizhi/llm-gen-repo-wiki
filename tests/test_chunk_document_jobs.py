@@ -63,6 +63,10 @@ class ChunkJobsTest(unittest.TestCase):
 
         self.assertEqual([len(wave) for wave in waves], [6, 6])
 
+    def test_negative_wave_size_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            CHUNK_DOCUMENT_JOBS.chunk_jobs([{"topic_title": "A"}], wave_size=-1)
+
 
 if __name__ == "__main__":
     unittest.main()
