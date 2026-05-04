@@ -193,7 +193,19 @@ python3 <wiki-gen-skill-dir>/select_pending_docs.py --force-all
 
   This returns all jobs from `llm-gen-wiki/documents.json` and disables resume skipping for the run.
 
-Dispatch the selected writing subagents in a **single Agent batch call** — one Agent tool invocation per selected document job, all sent simultaneously (not sequentially). If the selected job list is empty, skip directly to Step 6.
+Run the skill-local chunking helper on the selected job list and process the returned waves in order:
+
+```bash
+python3 <wiki-gen-skill-dir>/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+```
+
+Each returned wave contains at most 6 document jobs. For each wave:
+
+1. dispatch one Agent batch call containing only that wave's jobs
+2. wait for the entire wave to complete
+3. only if the wave completes cleanly should you continue to the next wave
+
+If the selected job list is empty, skip directly to Step 6.
 
 Each subagent is invoked with the `wiki-write-topic` skill and receives:
 
@@ -214,11 +226,11 @@ Each subagent is invoked with the `wiki-write-topic` skill and receives:
 | `language` | Value from Step 0 |
 | `business_context` | `business_context` from the document job |
 
-Wait for all selected subagents to complete before proceeding.
+If any wave contains a failed, timed-out, canceled, or batch-level errored job, stop before dispatching any later waves. Surface which jobs in the current wave succeeded, which failed, and that later queued jobs were not started. In that case, do not proceed to Step 6 or Step 7; instead, exit with a partial-success summary.
 
 ## Step 6 — Write `llm-gen-wiki/index.md`
 
-After all subagents complete, run the skill-local `render_index.py` script to rebuild `llm-gen-wiki/index.md` from `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being documented:
+After all waves complete cleanly, run the skill-local `render_index.py` script to rebuild `llm-gen-wiki/index.md` from `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being documented:
 
 ```bash
 python3 <wiki-gen-skill-dir>/render_index.py
@@ -226,7 +238,7 @@ python3 <wiki-gen-skill-dir>/render_index.py
 
 ## Step 7 — Append to `llm-gen-wiki/log.md`
 
-After writing `llm-gen-wiki/index.md`, run the skill-local `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the generation record. Keep the current working directory at the repository root being documented:
+After writing `llm-gen-wiki/index.md`, run the skill-local `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the generation record. Keep the current working directory at the repository root being documented. Skip this step entirely if any wave failed:
 
 ```bash
 python3 <wiki-gen-skill-dir>/append_log.py

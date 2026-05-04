@@ -258,7 +258,17 @@ The script writes `llm-gen-wiki/documents.json` for the full current plan. Read 
 
 ### Step A6 — Dispatch Writing Subagent(s)
 
-Dispatch **all** writing subagents in a **single Agent batch call**.
+Chunk the selected document jobs into sequential waves of at most 6 jobs using the shared helper:
+
+```bash
+python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+```
+
+For each returned wave:
+
+1. dispatch one Agent batch call containing only that wave's jobs
+2. wait for the entire wave to complete
+3. only if the wave completes cleanly should you continue to the next wave
 
 Each subagent uses the `wiki-write-topic` skill. Use the selected document jobs from `llm-gen-wiki/documents.json` as the source of truth.
 
@@ -279,7 +289,7 @@ Each subagent uses the `wiki-write-topic` skill. Use the selected document jobs 
 | `language` | From Step 2 |
 | `business_context` | `business_context` from the document job |
 
-Wait for all subagents to complete.
+If any wave contains a failed, timed-out, canceled, or batch-level errored job, stop before dispatching any later waves. Surface which jobs in the current wave succeeded, which failed, and that later queued jobs were not started. In that case, do not proceed to Shared Steps; instead, exit with a partial-success summary.
 
 ### Step A7 — Finalize
 
@@ -388,13 +398,19 @@ python3 <wiki-update-skill-dir>/compute_docs.py
 
 Read `llm-gen-wiki/documents.json` and collect jobs whose `topic_id` or `parent_topic_id` matches any selected topic id.
 
-### Step E5 — Dispatch All Writing Subagents in One Parallel Batch
+### Step E5 — Dispatch Writing Subagents In Capped Waves
 
-Dispatch **all** writing subagents for **all** selected topics in a **single Agent batch call** — one subagent per document, all sent simultaneously.
+Chunk the selected document jobs into sequential waves of at most 6 jobs using the shared helper:
+
+```bash
+python3 <wiki-update-skill-dir>/../wiki-gen/chunk_document_jobs.py /absolute/path/to/selected-jobs.json
+```
+
+Dispatch one Agent batch call per wave, wait for the whole wave to complete, and only then continue to the next wave.
 
 Pass the same 14 inputs as Step A6 to each `wiki-write-topic` subagent, using the selected document jobs and the fresh metadata values from Step 2 for `generated_at`, `branch`, `commit_hash`, `origin_url`, `repo_type`, `scope_prefix`, and `language`. The regenerated documents overwrite existing files at the same paths.
 
-Wait for all subagents to complete.
+If any wave contains a failed, timed-out, canceled, or batch-level errored job, stop before dispatching any later waves. Surface which jobs in the current wave succeeded, which failed, and that later queued jobs were not started. In that case, do not proceed to Shared Steps; instead, exit with a partial-success summary.
 
 ### Step E6 — Finalize
 
@@ -406,7 +422,7 @@ Proceed to **Shared Steps** (Steps S1–S3) with mode = `edit`, topic list = [al
 
 ### Step S1 — Rebuild index.md
 
-After all writing subagents complete, run the skill-local `render_index.py` script to fully rebuild `llm-gen-wiki/index.md` from the current `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being updated:
+After all writing waves complete cleanly, run the skill-local `render_index.py` script to fully rebuild `llm-gen-wiki/index.md` from the current `llm-gen-wiki/plan.yml` and `llm-gen-wiki/meta.yml`. Keep the current working directory at the repository root being updated:
 
 ```bash
 python3 <wiki-update-skill-dir>/render_index.py
@@ -414,7 +430,7 @@ python3 <wiki-update-skill-dir>/render_index.py
 
 ### Step S2 — Append to log.md
 
-Run the `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the correct add/edit record:
+Run the `append_log.py` script to create or repair `llm-gen-wiki/log.md` and append the correct add/edit record. Skip this step entirely if any wave failed:
 
 ```bash
 # Add mode
