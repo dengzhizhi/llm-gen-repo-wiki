@@ -36,10 +36,16 @@ This skill is invoked as a subagent by the `wiki-gen` orchestrator skill. It rec
 4. **Build an internal evidence map** — Before drafting prose, identify the functions, classes, commands, config keys, data structures, entry points, workflows, error paths, and source line ranges that are directly relevant to the topic.
 5. **Draft an internal outline** — Plan the H2/H3 structure before writing. Each planned section must have at least one supporting source file and, for full deep-dives, the outline should include a workflow or data-flow section when the sources support one.
 6. **Generate the document** — Follow the Prompt section below exactly to produce the wiki markdown. If `is_overview` is `true`, follow the Overview Mode instructions instead of the full deep-dive.
-7. **Validate Mermaid syntax when possible** — If the document contains Mermaid diagrams, check whether `mmdc` (mermaid-cli) is available. If it is available, dispatch a subagent to validate Mermaid syntax only. The subagent does not need to keep or return rendered image files; it only reports syntax errors that must be fixed before writing.
+7. **Validate Mermaid syntax when possible** — If the document contains Mermaid diagrams, check whether `mmdc` (mermaid-cli) is available. If it is available, run the skill-local `validate_mermaid_blocks.py` helper once against the drafted chapter document. If the helper reports failures, repair the broken Mermaid blocks using the reported source and error output, then rerun the same helper before final persistence.
 8. **Self-audit before writing** — Verify the completed document against the Quality Audit checklist below before writing it.
 9. **Persist the completed chapter atomically** — Use the skill-local `atomic_write.py` helper to write the completed non-empty markdown document to a sibling temporary path and replace `output_file` only after the full document is ready.
 10. **Confirm only after persistence succeeds** — After the atomic replace succeeds, output exactly one confirmation line: `Written: [output_file]`. Do NOT print the document body to stdout.
+
+For Mermaid validation:
+
+- success means the helper exits with code `0` and prints only one terse success line
+- failure means the helper exits non-zero and prints per-block failure sections that include the Mermaid source and error reason
+- do not proceed to final atomic persistence while Mermaid validation is failing
 
 The file at `output_file` is the durable success artifact for this subagent only when it is a completed non-empty chapter document.
 
@@ -228,7 +234,7 @@ Before writing the document to `output_file`, review it internally and fix any i
 - At least 5 distinct source files are cited when 5 relevant files exist; otherwise every relevant source file is cited.
 - Every Mermaid diagram and Markdown table has a nearby citation.
 - Complex Mermaid diagrams use category colors when they improve readability, and the category meaning is clear from labels, grouping, or nearby prose.
-- If Mermaid diagrams are present and `mmdc` is available, a subagent has validated their syntax and any syntax errors have been fixed. Do not require or preserve image output from this check.
+- If Mermaid diagrams are present and `mmdc` is available, the local validator helper has validated every Mermaid block in the document during one helper run and any reported failures have been fixed. Do not require or preserve image output from this check.
 - Mermaid node labels and edge labels use double quotes where Mermaid syntax supports quoting, especially when labels contain spaces or special characters.
 - Every fenced code block has an explicit language tag.
 - Citation links use precise line ranges whenever possible.
