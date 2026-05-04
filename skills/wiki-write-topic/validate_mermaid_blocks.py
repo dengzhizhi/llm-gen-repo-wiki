@@ -23,12 +23,14 @@ def extract_mermaid_blocks(markdown_text: str):
             continue
         if in_block and stripped == "```":
             index += 1
+            line_end = max(line_start, lineno - 1)
             blocks.append(
                 {
                     "index": index,
                     "line_start": line_start,
-                    "line_end": lineno - 1,
+                    "line_end": line_end,
                     "source": "\n".join(block_lines),
+                    "unterminated": False,
                 }
             )
             in_block = False
@@ -36,6 +38,18 @@ def extract_mermaid_blocks(markdown_text: str):
             continue
         if in_block:
             block_lines.append(line)
+    if in_block:
+        index += 1
+        line_end = max(line_start, len(lines))
+        blocks.append(
+            {
+                "index": index,
+                "line_start": line_start,
+                "line_end": line_end,
+                "source": "\n".join(block_lines),
+                "unterminated": True,
+            }
+        )
     return blocks
 
 
@@ -86,6 +100,9 @@ def validate_markdown_file(markdown_path: Path):
     blocks = extract_mermaid_blocks(markdown_text)
     failures = []
     for block in blocks:
+        if block.get("unterminated"):
+            failures.append({**block, "error": "unterminated mermaid fence"})
+            continue
         error = validate_block_source(block["source"])
         if error:
             failures.append({**block, "error": error})

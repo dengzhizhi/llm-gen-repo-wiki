@@ -59,7 +59,9 @@ A->>B: Ping
     def test_unterminated_mermaid_fence_is_ignored_deterministically(self):
         markdown = "```mermaid\ngraph TD\nA-->B\n"
         blocks = VALIDATE.extract_mermaid_blocks(markdown)
-        self.assertEqual(blocks, [])
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(blocks[0]["unterminated"])
+        self.assertIn("graph TD", blocks[0]["source"])
 
 
 class ValidateOutputShapeTest(unittest.TestCase):
@@ -166,6 +168,33 @@ A-->
         self.assertEqual(exit_code, 1)
         self.assertIn("block_index=2", output)
         self.assertNotIn("block_index=1", output)
+
+    def test_unterminated_mermaid_fence_returns_controlled_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chapter.md"
+            path.write_text("```mermaid\ngraph TD\nA-->B\n")
+
+            exit_code, output = VALIDATE.validate_markdown_file(path)
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("unterminated", output.lower())
+        self.assertIn("block_index=1", output)
+
+    def test_empty_mermaid_block_reports_forward_line_range(self):
+        markdown = "```mermaid\n```"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chapter.md"
+            path.write_text(markdown)
+
+            def fake_run(cmd, capture_output, text):
+                return mock.Mock(returncode=1, stderr="Empty diagram")
+
+            with mock.patch.object(VALIDATE.subprocess, "run", side_effect=fake_run):
+                exit_code, output = VALIDATE.validate_markdown_file(path)
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("line_range=2-2", output)
 
 
 class ValidateMainTest(unittest.TestCase):
