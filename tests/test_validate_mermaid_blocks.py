@@ -128,6 +128,44 @@ A-->B
         self.assertNotEqual(exit_code, 0)
         self.assertIn("mmdc", output)
 
+    def test_validates_all_blocks_and_reports_only_failures(self):
+        markdown = """```mermaid
+graph TD
+A-->B
+```
+
+```mermaid
+graph TD
+A-->
+```"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chapter.md"
+            path.write_text(markdown)
+
+            def fake_run(cmd, capture_output, text):
+                input_path = Path(cmd[2])
+                source = input_path.read_text()
+                if "A-->" in source and "A-->B" not in source:
+                    return mock.Mock(returncode=1, stderr="Parse error")
+                return mock.Mock(returncode=0, stderr="", stdout="")
+
+            with mock.patch.object(VALIDATE.subprocess, "run", side_effect=fake_run):
+                exit_code, output = VALIDATE.validate_markdown_file(path)
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("block_index=2", output)
+        self.assertNotIn("block_index=1", output)
+
+
+class ValidateMainTest(unittest.TestCase):
+    def test_main_requires_exactly_one_path_argument(self):
+        with mock.patch("builtins.print") as fake_print:
+            exit_code = VALIDATE.main([])
+
+        self.assertEqual(exit_code, 2)
+        fake_print.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
