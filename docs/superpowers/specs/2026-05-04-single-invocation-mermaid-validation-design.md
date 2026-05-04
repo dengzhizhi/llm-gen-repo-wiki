@@ -35,6 +35,22 @@ The new helper should accept the path to one Markdown document, scan it for all 
 
 One script invocation may validate many Mermaid diagrams, but it is still one document-scoped validation run.
 
+### Helper Contract
+
+The helper should be a repo-local CLI script under `skills/wiki-write-topic/` with this callable shape:
+
+```bash
+python3 <wiki-write-topic-skill-dir>/<helper-name>.py /absolute/path/to/chapter.md
+```
+
+Contract requirements:
+
+- input: exactly one Markdown file path argument
+- exit code `0`: all Mermaid blocks in the file passed validation, or the file contains no Mermaid blocks
+- exit code non-zero: one or more Mermaid blocks failed validation, or the helper could not complete because the input file or validator invocation was invalid
+
+The helper should print all normal result reporting to stdout so the calling writer can inspect a single response stream.
+
 ### Extraction Behavior
 
 The helper should parse the chapter Markdown in source order and extract every block that uses a fenced code block header of ` ```mermaid `.
@@ -59,7 +75,12 @@ This avoids cross-diagram contamination and keeps error attribution precise.
 
 If every Mermaid block in the document passes validation, the helper should emit only a simple success state.
 
-The success output should be intentionally terse, for example a single machine-friendly line indicating success plus the number of validated Mermaid blocks.
+The success output should be intentionally terse: one machine-friendly line only, including:
+
+- status: `ok`
+- validated Mermaid block count
+
+For example, a line such as `ok mermaid_blocks=3`.
 
 The goal is that a clean chapter does not flood the model with noise.
 
@@ -74,6 +95,8 @@ Each failure entry should include:
 - the Mermaid source code that failed
 - the `mmdc` error output or parser failure reason
 
+The failure output should start with one machine-friendly summary line indicating failure plus the number of failed blocks, then include repeated per-block sections in a stable text format so the model can read them reliably.
+
 The output should be designed for immediate model debugging: when the validator fails, the writing agent should be able to inspect the reported block source and error message, repair the broken Mermaid code, and rerun validation.
 
 ### No-Diagram Case
@@ -81,6 +104,8 @@ The output should be designed for immediate model debugging: when the validator 
 If the document contains no Mermaid blocks, the helper should return a simple success state rather than failing.
 
 The validator exists to check Mermaid syntax, not to require Mermaid content in every file.
+
+An empty or whitespace-only Markdown document should therefore also succeed with the same terse success format and a Mermaid block count of `0`.
 
 ### Temporary File Handling
 
@@ -128,3 +153,6 @@ Verify the design by checking:
 - failed validation reports the broken Mermaid source and the error reason per block
 - multiple Mermaid blocks in one document are validated independently
 - temporary validation artifacts are not kept after the run
+- a mixed document with both passing and failing Mermaid blocks reports only the failing blocks while still validating all blocks in one run
+- empty or whitespace-only Markdown succeeds with zero Mermaid blocks
+- malformed or unterminated Mermaid fences are handled deterministically by the extractor and covered by tests
