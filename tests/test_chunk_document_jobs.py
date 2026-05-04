@@ -56,6 +56,13 @@ class ChunkJobsTest(unittest.TestCase):
         self.assertIn('"topic_title": "A"', rendered)
         self.assertIn("[", rendered)
 
+    def test_exact_multiple_of_six_has_no_extra_empty_wave(self):
+        jobs = [{"topic_title": f"Doc {i}"} for i in range(12)]
+
+        waves = CHUNK_DOCUMENT_JOBS.chunk_jobs(jobs, wave_size=6)
+
+        self.assertEqual([len(wave) for wave in waves], [6, 6])
+
 
 if __name__ == "__main__":
     unittest.main()
