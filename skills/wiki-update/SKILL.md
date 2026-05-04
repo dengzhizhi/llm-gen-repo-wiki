@@ -10,7 +10,7 @@ description: Use when adding a new topic to an already-generated wiki, or editin
 This skill handles topic-level operations on an existing wiki produced by `wiki-gen`. It supports two modes:
 
 - **Add** — discover relevant files, draft a new topic YAML entry, confirm with user, append to `plan.yml`, and generate new document(s).
-- **Edit** — select one or more existing topics, update each topic's metadata or generation instructions, batch-update `plan.yml`, and regenerate all selected topics' documents in a single parallel dispatch.
+- **Edit** — select one or more existing topics, update each topic's metadata or generation instructions, batch-update `plan.yml`, and regenerate all selected topics' documents in sequential waves of at most 6 subagents at a time.
 
 In both modes the skill refreshes repository metadata so regenerated documents carry the current commit hash and timestamp, then rebuilds `llm-gen-wiki/index.md` and appends to `llm-gen-wiki/log.md` when done.
 
