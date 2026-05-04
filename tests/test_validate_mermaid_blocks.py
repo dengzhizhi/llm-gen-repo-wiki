@@ -112,6 +112,16 @@ class ValidateMarkdownFileEdgeCasesTest(unittest.TestCase):
         self.assertNotEqual(exit_code, 0)
         self.assertIn("error", output.lower())
 
+    def test_invalid_utf8_input_returns_controlled_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chapter.md"
+            path.write_bytes(b"\xff\xfe\xfd")
+
+            exit_code, output = VALIDATE.validate_markdown_file(path)
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("error", output.lower())
+
     def test_missing_mmdc_returns_controlled_failure(self):
         markdown = """```mermaid
 graph TD

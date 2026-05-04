@@ -81,7 +81,7 @@ def validate_block_source(source: str):
 def validate_markdown_file(markdown_path: Path):
     try:
         markdown_text = markdown_path.read_text()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return 2, f"error reading_markdown path={markdown_path} reason={exc}"
     blocks = extract_mermaid_blocks(markdown_text)
     failures = []
