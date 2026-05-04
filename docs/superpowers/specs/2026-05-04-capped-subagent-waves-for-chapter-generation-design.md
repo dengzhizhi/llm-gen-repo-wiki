@@ -68,6 +68,19 @@ At that point it should surface:
 
 This preserves the intended containment boundary: at most 6 jobs are exposed to one failure wave.
 
+The run should exit with a partial-success summary rather than pretending generation completed normally.
+
+### Batch-Level Failure Semantics
+
+The orchestrator should treat the following as wave failures even when it does not receive a clean per-job completion set:
+
+- Agent batch transport or invocation errors
+- timeouts while waiting for the current wave
+- canceled or interrupted subagents
+- model-level failures that prevent a job from producing its normal completed output
+
+In these cases, the orchestrator should stop later waves, report the current wave as failed, and surface whatever job-level success or failure information is available without inventing missing statuses.
+
 ### Durable Outputs
 
 Successful chapter files from earlier waves remain valid durable artifacts under the existing chapter-output rules.
@@ -81,6 +94,12 @@ For `wiki-update`, the same rule applies to regenerated chapters: completed outp
 `index.md` and `log.md` generation should remain end-of-run aggregate steps.
 
 If a failure occurs in any wave, the orchestrator should not proceed to aggregate output steps that assume chapter generation completed cleanly.
+
+Concretely:
+
+- do not rebuild `index.md`
+- do not append a normal completed-run entry to `log.md`
+- do surface a partial-success summary to the user before exiting
 
 ### Scope Of Changes
 
